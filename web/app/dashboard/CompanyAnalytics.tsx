@@ -79,9 +79,7 @@ function Change({ value }: { value: number | null }) {
   )
 }
 
-function StatCard({
-  label, value, sub, color = 'text-white', change,
-}: {
+function StatCard({ label, value, sub, color = 'text-white', change }: {
   label: string; value: string; sub?: string; color?: string; change?: number | null
 }) {
   return (
@@ -92,6 +90,51 @@ function StatCard({
       </div>
       <p className="text-xs text-zinc-500 mt-0.5">{label}</p>
       {sub && <p className="text-xs text-zinc-600 mt-0.5">{sub}</p>}
+    </div>
+  )
+}
+
+function SectionLoading({ label }: { label: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 p-5 text-center text-zinc-600 text-xs animate-pulse">
+      Loading {label}...
+    </div>
+  )
+}
+
+function SectionError({ message }: { message: string }) {
+  return (
+    <div className="rounded-xl border border-red-900/30 bg-red-900/10 p-4 text-xs text-red-400">
+      {message}
+    </div>
+  )
+}
+
+function BarChart({ bars, colorClass }: {
+  bars: Array<{ value: number; label: string; tooltip: string }>
+  colorClass: string
+}) {
+  const max = Math.max(...bars.map(b => b.value), 1)
+  return (
+    <div>
+      <div className="flex items-end gap-1" style={{ height: 64 }}>
+        {bars.map((b, i) => (
+          <div key={b.label} className="flex-1 flex items-end" style={{ height: 64 }}>
+            <div
+              title={b.tooltip}
+              className={`w-full rounded-sm ${b.value === 0 ? 'bg-zinc-800' : i === bars.length - 1 ? colorClass : colorClass + '/60'}`}
+              style={{ height: Math.max(3, Math.round((b.value / max) * 64)) }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-1 mt-1">
+        {bars.map(b => (
+          <div key={b.label} className="flex-1 text-center">
+            <span className="text-xs text-zinc-700">{b.label}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -114,38 +157,6 @@ function formatDuration(seconds: number) {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
 
-function MiniSparkline({ values, color = 'bg-zinc-600' }: { values: number[]; color?: string }) {
-  const max = Math.max(...values, 1)
-  return (
-    <div className="flex items-end gap-0.5 h-8">
-      {values.map((v, i) => (
-        <div
-          key={i}
-          className={`flex-1 rounded-sm ${i === values.length - 1 ? color.replace('bg-', 'bg-') + ' opacity-100' : color + ' opacity-60'}`}
-          style={{ height: `${Math.max(10, Math.round((v / max) * 32))}%` }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function ConnectCard({ title, steps }: { title: string; steps: string[] }) {
-  return (
-    <div className="rounded-xl border border-dashed border-zinc-700 p-5">
-      <p className="text-sm font-medium text-zinc-300 mb-1">{title}</p>
-      <p className="text-xs text-zinc-500 mb-3">Follow these steps to connect:</p>
-      <ol className="space-y-1.5">
-        {steps.map((s, i) => (
-          <li key={i} className="text-xs text-zinc-500 flex gap-2">
-            <span className="text-zinc-700 shrink-0">{i + 1}.</span>
-            <span>{s}</span>
-          </li>
-        ))}
-      </ol>
-    </div>
-  )
-}
-
 export default function CompanyAnalytics({
   companyId,
   adminKey,
@@ -161,8 +172,9 @@ export default function CompanyAnalytics({
   const [ga4, setGa4] = useState<GA4Data | null>(null)
   const [gsc, setGsc] = useState<GSCData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [ga4Loading, setGa4Loading] = useState(false)
-  const [gscLoading, setGscLoading] = useState(false)
+  // 'idle' | 'loading' | 'done' | 'error'
+  const [ga4Status, setGa4Status] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [gscStatus, setGscStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [error, setError] = useState('')
   const [propertyIdInput, setPropertyIdInput] = useState('')
   const [savingPropertyId, setSavingPropertyId] = useState(false)
@@ -172,6 +184,11 @@ export default function CompanyAnalytics({
   useEffect(() => {
     setLoading(true)
     setError('')
+    setGa4(null)
+    setGsc(null)
+    setGa4Status('idle')
+    setGscStatus('idle')
+
     fetch(`/api/admin/analytics?company_id=${companyId}`, { headers })
       .then(r => r.json())
       .then(d => {
@@ -179,22 +196,20 @@ export default function CompanyAnalytics({
         setData(d)
         setLoading(false)
 
-        // Fetch GA4 if property ID is set
+        // Fetch GSC (always — uses domain)
+        setGscStatus('loading')
+        fetch(`/api/admin/analytics/gsc?domain=${d.company.domain}`, { headers })
+          .then(r => r.json())
+          .then(gscd => { setGsc(gscd); setGscStatus('done') })
+          .catch(() => setGscStatus('error'))
+
+        // Fetch GA4 only if property ID is configured
         if (d.company.ga4_property_id) {
-          setGa4Loading(true)
+          setGa4Status('loading')
           fetch(`/api/admin/analytics/ga4?property_id=${d.company.ga4_property_id}`, { headers })
             .then(r => r.json())
-            .then(ga4d => { setGa4(ga4d); setGa4Loading(false) })
-            .catch(() => setGa4Loading(false))
-        }
-
-        // Fetch GSC always (uses domain)
-        if (d.company.domain) {
-          setGscLoading(true)
-          fetch(`/api/admin/analytics/gsc?domain=${d.company.domain}`, { headers })
-            .then(r => r.json())
-            .then(gscd => { setGsc(gscd); setGscLoading(false) })
-            .catch(() => setGscLoading(false))
+            .then(ga4d => { setGa4(ga4d); setGa4Status('done') })
+            .catch(() => setGa4Status('error'))
         }
       })
       .catch(() => { setError('Failed to load analytics.'); setLoading(false) })
@@ -205,31 +220,35 @@ export default function CompanyAnalytics({
     setSavingPropertyId(true)
     await onSavePropertyId(companyId, propertyIdInput.trim())
     setSavingPropertyId(false)
-    // Refresh GA4 data
-    setGa4Loading(true)
+    if (data) setData({ ...data, company: { ...data.company, ga4_property_id: propertyIdInput.trim() } })
+    // Immediately fetch GA4 with new property ID
+    setGa4Status('loading')
     fetch(`/api/admin/analytics/ga4?property_id=${propertyIdInput.trim()}`, { headers })
       .then(r => r.json())
-      .then(ga4d => { setGa4(ga4d); setGa4Loading(false) })
-      .catch(() => setGa4Loading(false))
-    if (data) setData({ ...data, company: { ...data.company, ga4_property_id: propertyIdInput.trim() } })
+      .then(ga4d => { setGa4(ga4d); setGa4Status('done') })
+      .catch(() => setGa4Status('error'))
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-40"><span className="text-zinc-500 text-sm animate-pulse">Loading analytics...</span></div>
+    return (
+      <div className="flex items-center justify-center h-40">
+        <span className="text-zinc-500 text-sm animate-pulse">Loading analytics...</span>
+      </div>
+    )
   }
   if (error || !data) return <p className="text-red-400 text-sm">{error || 'No data'}</p>
 
   const { company, content, keywords, citations, health } = data
   const totalKwDist = keywords.distribution.top3 + keywords.distribution.top10 + keywords.distribution.top30 + keywords.distribution.beyond30 + keywords.distribution.unranked
-  const maxMonthly = Math.max(...content.postsPerMonth.map(m => m.count), content.targetMonthlyPosts, 1)
   const healthColor = health.score >= 70 ? 'text-green-400' : health.score >= 40 ? 'text-yellow-400' : 'text-red-400'
-  const gscReady = gsc && !gsc.error
-  const ga4Ready = ga4 && !ga4.error
+
+  const gscReady = gscStatus === 'done' && gsc && !gsc.error
+  const ga4Ready = ga4Status === 'done' && ga4 && !ga4.error
 
   return (
     <div className="space-y-6">
 
-      {/* Company header */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-semibold text-lg">{company.name}</h2>
@@ -243,13 +262,13 @@ export default function CompanyAnalytics({
         </button>
       </div>
 
-      {/* GA4 Property ID — always visible settings row */}
+      {/* GA4 Property ID bar */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 flex items-center gap-3">
         <span className="text-xs text-zinc-500 shrink-0">GA4 Property ID</span>
         <input
           value={propertyIdInput || company.ga4_property_id || ''}
           onChange={e => setPropertyIdInput(e.target.value)}
-          placeholder="e.g. 123456789  — find this in GA4 → Admin → Property Settings"
+          placeholder="e.g. 123456789 — find in GA4 → Admin → Property Settings"
           className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
         />
         <button
@@ -264,191 +283,192 @@ export default function CompanyAnalytics({
         )}
       </div>
 
-      {/* ── SEARCH CONSOLE SECTION ───────────────────────────────────────────── */}
+      {/* ── SEARCH CONSOLE ────────────────────────────────────────────────────── */}
       <div>
-        <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">Search Performance (Google Search Console)</h3>
+        <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">
+          Search Performance · Google Search Console
+        </h3>
 
-        {gscLoading ? (
-          <div className="rounded-xl border border-zinc-800 p-6 text-center text-zinc-600 text-xs animate-pulse">Loading Search Console data...</div>
+        {gscStatus === 'loading' ? (
+          <SectionLoading label="Search Console data" />
+        ) : gscStatus === 'error' ? (
+          <SectionError message="Could not reach the Search Console API. Check your GOOGLE_SERVICE_ACCOUNT_KEY env var and redeploy." />
         ) : gsc?.error === 'not_configured' ? (
-          <ConnectCard
-            title="Connect Google Search Console"
-            steps={[
-              'Go to console.cloud.google.com → create a project',
-              'Enable "Google Search Console API"',
-              'Create a Service Account → download JSON key',
-              'Add service account email to Search Console as Full User',
-              'Add GOOGLE_SERVICE_ACCOUNT_KEY (full JSON) to Vercel env vars',
-              'Redeploy — Search Console data will appear automatically',
-            ]}
-          />
-        ) : gsc?.error === 'permission_denied' ? (
-          <div className="rounded-xl border border-red-900/30 bg-red-900/10 p-4 text-xs text-red-400">
-            Permission denied. Make sure the service account email is added to Search Console for {company.domain} as a Full User.
+          <div className="rounded-xl border border-dashed border-zinc-700 p-5 text-xs text-zinc-500">
+            Add <code className="text-zinc-400">GOOGLE_SERVICE_ACCOUNT_KEY</code> to Vercel environment variables to connect Search Console.
           </div>
+        ) : gsc?.error === 'permission_denied' ? (
+          <SectionError message={`Permission denied for ${company.domain}. Add the service account email to Search Console as a Full User.`} />
+        ) : gsc?.error ? (
+          <SectionError message={`Search Console error: ${gsc.error}`} />
         ) : gscReady ? (
           <div className="space-y-4">
-            {/* GSC summary cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <StatCard label="Clicks (30d)" value={gsc.summary.clicks.value.toLocaleString()} change={gsc.summary.clicks.change} color="text-blue-400" />
-              <StatCard label="Impressions (30d)" value={gsc.summary.impressions.value.toLocaleString()} change={gsc.summary.impressions.change} color="text-zinc-200" />
+              <StatCard label="Impressions (30d)" value={gsc.summary.impressions.value.toLocaleString()} change={gsc.summary.impressions.change} />
               <StatCard label="Avg CTR" value={`${gsc.summary.ctr.value}%`} color={gsc.summary.ctr.value >= 3 ? 'text-green-400' : 'text-yellow-400'} />
-              <StatCard label="Avg Position" value={`#${gsc.summary.position.value}`} color={gsc.summary.position.value <= 10 ? 'text-green-400' : 'text-zinc-300'} />
+              <StatCard label="Avg Position" value={`#${gsc.summary.position.value}`} color={gsc.summary.position.value > 0 && gsc.summary.position.value <= 10 ? 'text-green-400' : 'text-zinc-300'} />
             </div>
 
-            {/* GSC trend chart */}
             {gsc.trend.length > 0 && (
               <div className="rounded-xl border border-zinc-800 p-5">
-                <p className="text-xs text-zinc-500 mb-3">Clicks per day (last 30 days)</p>
-                <div className="flex items-end gap-1 h-16">
-                  {gsc.trend.map((d, i) => {
-                    const maxClicks = Math.max(...gsc.trend.map(t => t.clicks), 1)
-                    const h = Math.max(4, Math.round((d.clicks / maxClicks) * 64))
-                    return (
-                      <div
-                        key={d.date}
-                        title={`${d.date}: ${d.clicks} clicks`}
-                        className={`flex-1 rounded-sm ${i === gsc.trend.length - 1 ? 'bg-blue-500' : 'bg-blue-900/60'}`}
-                        style={{ height: `${h}px` }}
-                      />
-                    )
-                  })}
-                </div>
-                <div className="flex justify-between text-xs text-zinc-700 mt-1">
-                  <span>{gsc.trend[0]?.date}</span>
-                  <span>{gsc.trend[gsc.trend.length - 1]?.date}</span>
-                </div>
+                <p className="text-xs text-zinc-500 mb-3">Clicks per day — last 30 days</p>
+                <BarChart
+                  colorClass="bg-blue-500"
+                  bars={gsc.trend.map(d => ({
+                    value: d.clicks,
+                    label: d.date.slice(5), // MM-DD
+                    tooltip: `${d.date}: ${d.clicks} clicks, ${d.impressions} impressions`,
+                  }))}
+                />
               </div>
             )}
 
-            {/* Top queries + top pages */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-xl border border-zinc-800 p-5">
                 <p className="text-xs text-zinc-500 mb-3">Top search queries</p>
-                <div className="space-y-2">
-                  {gsc.queries.slice(0, 8).map(q => (
-                    <div key={q.query} className="flex items-center gap-2">
-                      <p className="text-xs text-zinc-300 flex-1 truncate">{q.query}</p>
-                      <span className="text-xs text-blue-400 shrink-0">{q.clicks} clicks</span>
-                      <span className="text-xs text-zinc-600 shrink-0">#{q.position}</span>
-                    </div>
-                  ))}
-                </div>
+                {gsc.queries.length === 0 ? (
+                  <p className="text-xs text-zinc-700">No query data yet.</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {gsc.queries.map(q => (
+                      <div key={q.query} className="flex items-center gap-2">
+                        <p className="text-xs text-zinc-300 flex-1 truncate">{q.query}</p>
+                        <span className="text-xs text-blue-400 shrink-0">{q.clicks} clicks</span>
+                        <span className="text-xs text-zinc-600 shrink-0">#{q.position}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="rounded-xl border border-zinc-800 p-5">
                 <p className="text-xs text-zinc-500 mb-3">Top pages by clicks</p>
-                <div className="space-y-2">
-                  {gsc.pages.slice(0, 8).map(p => {
-                    const slug = p.page.replace(/^https?:\/\/[^/]+/, '') || '/'
-                    return (
-                      <div key={p.page} className="flex items-center gap-2">
-                        <p className="text-xs text-zinc-300 flex-1 truncate">{slug}</p>
-                        <span className="text-xs text-blue-400 shrink-0">{p.clicks} clicks</span>
-                        <span className="text-xs text-zinc-600 shrink-0">{p.ctr}% CTR</span>
-                      </div>
-                    )
-                  })}
-                </div>
+                {gsc.pages.length === 0 ? (
+                  <p className="text-xs text-zinc-700">No page data yet.</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {gsc.pages.map(p => {
+                      const slug = p.page.replace(/^https?:\/\/[^/]+/, '') || '/'
+                      return (
+                        <div key={p.page} className="flex items-center gap-2">
+                          <p className="text-xs text-zinc-300 flex-1 truncate">{slug}</p>
+                          <span className="text-xs text-blue-400 shrink-0">{p.clicks} clicks</span>
+                          <span className="text-xs text-zinc-600 shrink-0">{p.ctr}% CTR</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         ) : (
-          <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-600">No Search Console data available.</div>
+          <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-600">
+            No Search Console data returned. Verify the site is verified in Search Console and the service account has Full User access.
+          </div>
         )}
       </div>
 
-      {/* ── GOOGLE ANALYTICS SECTION ─────────────────────────────────────────── */}
+      {/* ── GOOGLE ANALYTICS 4 ───────────────────────────────────────────────── */}
       <div>
-        <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">Traffic (Google Analytics 4)</h3>
+        <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">
+          Traffic · Google Analytics 4
+        </h3>
 
-        {!company.ga4_property_id && !ga4Ready ? (
+        {!company.ga4_property_id && ga4Status === 'idle' ? (
           <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-500">
             Enter your GA4 Property ID in the field above to connect Google Analytics.
           </div>
-        ) : ga4Loading ? (
-          <div className="rounded-xl border border-zinc-800 p-6 text-center text-zinc-600 text-xs animate-pulse">Loading GA4 data...</div>
-        ) : ga4?.error === 'permission_denied' ? (
-          <div className="rounded-xl border border-red-900/30 bg-red-900/10 p-4 text-xs text-red-400">
-            Permission denied for Property ID {company.ga4_property_id}. Make sure the service account has Viewer access in GA4.
+        ) : ga4Status === 'loading' ? (
+          <SectionLoading label="GA4 data" />
+        ) : ga4Status === 'error' ? (
+          <SectionError message="Could not reach the GA4 API. Check your GOOGLE_SERVICE_ACCOUNT_KEY env var." />
+        ) : ga4?.error === 'not_configured' ? (
+          <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-500">
+            Add <code className="text-zinc-400">GOOGLE_SERVICE_ACCOUNT_KEY</code> to Vercel environment variables.
           </div>
+        ) : ga4?.error === 'permission_denied' ? (
+          <SectionError message={`Permission denied for property ${company.ga4_property_id}. Add the service account as Viewer in GA4 Property Access Management.`} />
+        ) : ga4?.error ? (
+          <SectionError message={`GA4 error: ${ga4.error}`} />
         ) : ga4Ready ? (
           <div className="space-y-4">
-            {/* GA4 summary cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <StatCard label="Sessions (30d)" value={ga4.summary.sessions.value.toLocaleString()} change={ga4.summary.sessions.change} color="text-green-400" />
-              <StatCard label="Users (30d)" value={ga4.summary.users.value.toLocaleString()} change={ga4.summary.users.change} color="text-zinc-200" />
-              <StatCard label="Page views" value={ga4.summary.pageviews.value.toLocaleString()} change={ga4.summary.pageviews.change} color="text-zinc-200" />
-              <StatCard label="Engagement rate" value={`${ga4.summary.engagementRate.value}%`} color={ga4.summary.engagementRate.value >= 50 ? 'text-green-400' : 'text-yellow-400'} sub={`Avg ${formatDuration(ga4.summary.avgSessionDuration.value)}/session`} />
+              <StatCard label="Users (30d)" value={ga4.summary.users.value.toLocaleString()} change={ga4.summary.users.change} />
+              <StatCard label="Page views" value={ga4.summary.pageviews.value.toLocaleString()} change={ga4.summary.pageviews.change} />
+              <StatCard
+                label="Engagement rate"
+                value={`${ga4.summary.engagementRate.value}%`}
+                color={ga4.summary.engagementRate.value >= 50 ? 'text-green-400' : 'text-yellow-400'}
+                sub={`Avg ${formatDuration(ga4.summary.avgSessionDuration.value)}/session`}
+              />
             </div>
 
-            {/* GA4 trend chart */}
             {ga4.trend.length > 0 && (
               <div className="rounded-xl border border-zinc-800 p-5">
-                <p className="text-xs text-zinc-500 mb-3">Sessions per day (last 30 days)</p>
-                <div className="flex items-end gap-1 h-16">
-                  {ga4.trend.map((d, i) => {
-                    const maxSessions = Math.max(...ga4.trend.map(t => t.sessions), 1)
-                    const h = Math.max(4, Math.round((d.sessions / maxSessions) * 64))
-                    return (
-                      <div
-                        key={d.date}
-                        title={`${d.date}: ${d.sessions} sessions`}
-                        className={`flex-1 rounded-sm ${i === ga4.trend.length - 1 ? 'bg-green-500' : 'bg-green-900/60'}`}
-                        style={{ height: `${h}px` }}
-                      />
-                    )
+                <p className="text-xs text-zinc-500 mb-3">Sessions per day — last 30 days</p>
+                <BarChart
+                  colorClass="bg-green-500"
+                  bars={ga4.trend.map(d => {
+                    const fmt = d.date.replace(/(\d{4})(\d{2})(\d{2})/, '$2-$3')
+                    return {
+                      value: d.sessions,
+                      label: fmt,
+                      tooltip: `${fmt}: ${d.sessions} sessions, ${d.users} users`,
+                    }
                   })}
-                </div>
-                <div className="flex justify-between text-xs text-zinc-700 mt-1">
-                  <span>{ga4.trend[0]?.date?.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')}</span>
-                  <span>{ga4.trend[ga4.trend.length - 1]?.date?.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')}</span>
-                </div>
+                />
               </div>
             )}
 
-            {/* Channels + Top pages */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-xl border border-zinc-800 p-5">
                 <p className="text-xs text-zinc-500 mb-3">Sessions by channel</p>
-                {(() => {
+                {ga4.channels.length === 0 ? (
+                  <p className="text-xs text-zinc-700">No channel data.</p>
+                ) : (() => {
                   const total = ga4.channels.reduce((s, c) => s + c.sessions, 0)
-                  return ga4.channels.map(c => (
-                    <div key={c.channel} className="flex items-center gap-2 mb-2">
-                      <span className="text-xs text-zinc-400 w-28 shrink-0 truncate">{c.channel}</span>
-                      <div className="flex-1 bg-zinc-900 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-green-700"
-                          style={{ width: `${total > 0 ? (c.sessions / total) * 100 : 0}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-zinc-500 shrink-0">{c.sessions.toLocaleString()}</span>
+                  return (
+                    <div className="space-y-2.5">
+                      {ga4.channels.map(c => (
+                        <div key={c.channel} className="flex items-center gap-2">
+                          <span className="text-xs text-zinc-400 w-32 shrink-0 truncate">{c.channel}</span>
+                          <div className="flex-1 bg-zinc-900 rounded-full h-1.5 overflow-hidden">
+                            <div className="h-full rounded-full bg-green-700" style={{ width: `${total > 0 ? (c.sessions / total) * 100 : 0}%` }} />
+                          </div>
+                          <span className="text-xs text-zinc-500 shrink-0">{c.sessions.toLocaleString()}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))
+                  )
                 })()}
               </div>
               <div className="rounded-xl border border-zinc-800 p-5">
                 <p className="text-xs text-zinc-500 mb-3">Top landing pages</p>
-                <div className="space-y-2">
-                  {ga4.topPages.map(p => {
-                    const slug = p.page || '/'
-                    return (
+                {ga4.topPages.length === 0 ? (
+                  <p className="text-xs text-zinc-700">No page data.</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {ga4.topPages.map(p => (
                       <div key={p.page} className="flex items-center gap-2">
-                        <p className="text-xs text-zinc-300 flex-1 truncate">{slug}</p>
+                        <p className="text-xs text-zinc-300 flex-1 truncate">{p.page || '/'}</p>
                         <span className="text-xs text-green-400 shrink-0">{p.sessions.toLocaleString()}</span>
-                        <span className="text-xs text-zinc-600 shrink-0">{p.engagementRate}%</span>
+                        <span className="text-xs text-zinc-600 shrink-0">{p.engagementRate}% eng</span>
                       </div>
-                    )
-                  })}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         ) : null}
       </div>
 
-      {/* ── SEO PERFORMANCE (internal data) ──────────────────────────────────── */}
+      {/* ── SEO PERFORMANCE ──────────────────────────────────────────────────── */}
       <div>
         <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">SEO Performance</h3>
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <StatCard
             label="Est. organic clicks/mo"
@@ -462,7 +482,11 @@ export default function CompanyAnalytics({
             sub={`${keywords.ranked}/${keywords.total} keywords ranking`}
             color={keywords.avgPosition != null && keywords.avgPosition <= 10 ? 'text-green-400' : 'text-zinc-300'}
           />
-          <StatCard label="Published posts" value={String(content.byStatus.published)} sub={`${content.publishedLast30} in last 30 days`} />
+          <StatCard
+            label="Published posts"
+            value={String(content.byStatus.published)}
+            sub={`${content.publishedLast30} in last 30 days`}
+          />
           <StatCard
             label="Brand mention rate"
             value={citations.citationRate != null ? `${citations.citationRate}%` : '—'}
@@ -472,11 +496,12 @@ export default function CompanyAnalytics({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
           {/* Keyword rank distribution */}
           <div className="rounded-xl border border-zinc-800 p-5">
-            <h3 className="font-medium text-sm mb-4">Keyword rank distribution</h3>
+            <p className="text-sm font-medium mb-4">Keyword rank distribution</p>
             {keywords.total === 0 ? (
-              <p className="text-zinc-600 text-xs">No keywords tracked yet.</p>
+              <p className="text-zinc-600 text-xs">No keywords tracked yet. Use the Keywords tab to research opportunities.</p>
             ) : (
               <div className="space-y-3">
                 {[
@@ -489,86 +514,89 @@ export default function CompanyAnalytics({
                   <div key={row.label} className="flex items-center gap-3">
                     <span className="text-xs text-zinc-500 w-28 shrink-0">{row.label}</span>
                     <div className="flex-1 bg-zinc-900 rounded-full h-2 overflow-hidden">
-                      <div className={`h-full rounded-full ${row.color}`} style={{ width: totalKwDist > 0 ? `${(row.count / totalKwDist) * 100}%` : '0%' }} />
+                      <div
+                        className={`h-full rounded-full ${row.color}`}
+                        style={{ width: totalKwDist > 0 ? `${(row.count / totalKwDist) * 100}%` : '0%' }}
+                      />
                     </div>
                     <span className="text-xs text-zinc-400 w-6 text-right shrink-0">{row.count}</span>
                   </div>
                 ))}
               </div>
             )}
-
             {keywords.rankHistory.length > 1 && (
               <div className="mt-4 pt-4 border-t border-zinc-800">
-                <p className="text-xs text-zinc-600 mb-2">Avg. position trend</p>
-                <div className="flex items-end gap-1 h-10">
-                  {keywords.rankHistory.map((point, i) => {
-                    const maxRank = Math.max(...keywords.rankHistory.map(p => p.avg_rank), 1)
-                    const h = Math.max(8, Math.round((point.avg_rank / maxRank) * 40))
-                    return (
-                      <div key={point.checked_at} title={`${point.checked_at}: avg #${point.avg_rank}`}
-                        className={`flex-1 rounded-sm ${i === keywords.rankHistory.length - 1 ? 'bg-blue-500' : 'bg-zinc-700'}`}
-                        style={{ height: `${h}px` }} />
-                    )
-                  })}
-                </div>
+                <p className="text-xs text-zinc-600 mb-2">Avg. position trend (lower = better)</p>
+                <BarChart
+                  colorClass="bg-blue-500"
+                  bars={keywords.rankHistory.map(p => ({
+                    value: p.avg_rank,
+                    label: p.checked_at.slice(5),
+                    tooltip: `${p.checked_at}: avg #${p.avg_rank}`,
+                  }))}
+                />
               </div>
             )}
           </div>
 
           {/* Content velocity */}
           <div className="rounded-xl border border-zinc-800 p-5">
-            <h3 className="font-medium text-sm mb-4">Content velocity</h3>
-            <div className="flex items-end gap-2 h-20 mb-3">
-              {content.postsPerMonth.map(m => {
-                const h = maxMonthly > 0 ? Math.max(4, Math.round((m.count / maxMonthly) * 80)) : 4
-                return (
-                  <div key={m.month} className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full flex items-end justify-center" style={{ height: '80px' }}>
-                      <div className={`w-full rounded-sm ${m.count === 0 ? 'bg-zinc-800' : m.count >= content.targetMonthlyPosts ? 'bg-green-600' : 'bg-zinc-600'}`} style={{ height: `${h}px` }} />
-                    </div>
-                    <span className="text-xs text-zinc-700">{m.label}</span>
-                  </div>
-                )
-              })}
-            </div>
-            <p className="text-xs text-zinc-600 mb-3">Target: {content.targetMonthlyPosts}/mo · Green = on target</p>
+            <p className="text-sm font-medium mb-4">Content velocity</p>
+            <BarChart
+              colorClass="bg-green-600"
+              bars={content.postsPerMonth.map(m => ({
+                value: m.count,
+                label: m.label,
+                tooltip: `${m.label}: ${m.count} posts published`,
+              }))}
+            />
+            <p className="text-xs text-zinc-600 mt-3 mb-3">Target: {content.targetMonthlyPosts}/mo</p>
             <div className="space-y-2">
-              <div className="flex justify-between text-xs"><span className="text-zinc-500">Schema markup rate</span><span className={content.schemaRate >= 80 ? 'text-green-400' : content.schemaRate >= 50 ? 'text-yellow-400' : 'text-red-400'}>{content.schemaRate}%</span></div>
-              <div className="flex justify-between text-xs"><span className="text-zinc-500">Drafts awaiting review</span><span className={content.byStatus.draft > 0 ? 'text-amber-400' : 'text-zinc-600'}>{content.byStatus.draft}</span></div>
+              <div className="flex justify-between text-xs">
+                <span className="text-zinc-500">Schema markup rate</span>
+                <span className={content.schemaRate >= 80 ? 'text-green-400' : content.schemaRate >= 50 ? 'text-yellow-400' : 'text-red-400'}>
+                  {content.schemaRate}%
+                </span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-zinc-500">Drafts awaiting review</span>
+                <span className={content.byStatus.draft > 0 ? 'text-amber-400' : 'text-zinc-600'}>
+                  {content.byStatus.draft}
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Opportunities + Health */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+
           <div className="rounded-xl border border-zinc-800 p-5 md:col-span-2">
             <p className="text-sm font-medium mb-1">Top keyword opportunities</p>
-            <p className="text-xs text-zinc-600 mb-3">Unranked · sorted by volume/difficulty score</p>
+            <p className="text-xs text-zinc-600 mb-3">Unranked · sorted by volume / difficulty</p>
             {keywords.opportunities.length === 0 ? (
               <p className="text-zinc-600 text-xs">No opportunities yet — research more keywords.</p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {keywords.opportunities.slice(0, 6).map(kw => (
                   <div key={kw.id} className="flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-zinc-200 truncate">{kw.keyword}</p>
-                    </div>
+                    <p className="text-xs text-zinc-200 flex-1 truncate">{kw.keyword}</p>
                     <span className="text-xs text-zinc-500 shrink-0">{kw.search_volume.toLocaleString()} vol</span>
                     <span className={`text-xs shrink-0 ${diffColor(kw.difficulty)}`}>{kw.difficulty}/100</span>
-                    <span className="text-xs text-zinc-600 shrink-0 w-10 text-right font-mono">{kw.score}</span>
+                    <span className="text-xs text-zinc-700 shrink-0 w-10 text-right font-mono">{kw.score}</span>
                   </div>
                 ))}
               </div>
             )}
             {keywords.quickWins.length > 0 && (
               <div className="mt-4 pt-4 border-t border-zinc-800">
-                <p className="text-xs text-zinc-600 mb-2">Quick wins — currently ranking 11-30</p>
+                <p className="text-xs text-zinc-600 mb-2">Quick wins — ranking 11–30, push to page 1</p>
                 <div className="space-y-2">
                   {keywords.quickWins.map(kw => (
                     <div key={kw.id} className="flex items-center gap-2">
                       <span className={`text-xs font-medium shrink-0 ${rankColor(kw.current_rank)}`}>#{kw.current_rank}</span>
                       <p className="text-xs text-zinc-300 flex-1 truncate">{kw.keyword}</p>
-                      <span className="text-xs text-zinc-600">{kw.search_volume.toLocaleString()}</span>
+                      <span className="text-xs text-zinc-600 shrink-0">{kw.search_volume.toLocaleString()}</span>
                     </div>
                   ))}
                 </div>
@@ -583,15 +611,23 @@ export default function CompanyAnalytics({
               <p className={`text-5xl font-semibold ${healthColor}`}>{health.score}</p>
               <div>
                 <p className="text-xs text-zinc-500">/ 100</p>
-                <p className={`text-xs font-medium mt-0.5 ${healthColor}`}>{health.score >= 70 ? 'Strong' : health.score >= 40 ? 'Developing' : 'Needs work'}</p>
+                <p className={`text-xs font-medium mt-0.5 ${healthColor}`}>
+                  {health.score >= 70 ? 'Strong' : health.score >= 40 ? 'Developing' : 'Needs work'}
+                </p>
               </div>
             </div>
             <div className="space-y-3">
               {Object.values(health.breakdown).map(dim => (
                 <div key={dim.label}>
-                  <div className="flex justify-between mb-1"><span className="text-xs text-zinc-500">{dim.label}</span><span className="text-xs text-zinc-400">{dim.score}/25</span></div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-xs text-zinc-500">{dim.label}</span>
+                    <span className="text-xs text-zinc-400">{dim.score}/25</span>
+                  </div>
                   <div className="bg-zinc-900 rounded-full h-1.5 overflow-hidden">
-                    <div className={`h-full rounded-full ${dim.score >= 20 ? 'bg-green-600' : dim.score >= 12 ? 'bg-yellow-600' : 'bg-zinc-600'}`} style={{ width: `${(dim.score / 25) * 100}%` }} />
+                    <div
+                      className={`h-full rounded-full ${dim.score >= 20 ? 'bg-green-600' : dim.score >= 12 ? 'bg-yellow-600' : 'bg-zinc-600'}`}
+                      style={{ width: `${(dim.score / 25) * 100}%` }}
+                    />
                   </div>
                 </div>
               ))}
