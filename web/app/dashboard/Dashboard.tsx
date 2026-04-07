@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Company, Post, CitationLog } from '../../lib/types'
 import PostEditor from './PostEditor'
+import CompanyAnalytics from './CompanyAnalytics'
 
-type Tab = 'companies' | 'posts' | 'keywords' | 'agents' | 'citations'
+type Tab = 'companies' | 'posts' | 'keywords' | 'agents' | 'citations' | 'analytics'
 
 type Keyword = {
   id: string
@@ -18,7 +19,7 @@ type Keyword = {
 }
 
 export default function Dashboard({ adminKey, onLogout }: { adminKey: string; onLogout: () => void }) {
-  const [tab, setTab] = useState<Tab>('companies')
+  const [tab, setTab] = useState<Tab>('analytics')
   const [companies, setCompanies] = useState<Company[]>([])
   const [posts, setPosts] = useState<Post[]>([])
   const [citations, setCitations] = useState<CitationLog[]>([])
@@ -45,6 +46,10 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
   const [runningSchedule, setRunningSchedule] = useState(false)
   const [scheduleResult, setScheduleResult] = useState('')
 
+  // Analytics tab state
+  const [analyticsCompanyId, setAnalyticsCompanyId] = useState('')
+  const [analyticsKey, setAnalyticsKey] = useState(0) // increment to force re-fetch
+
   // Filters
   const [postFilterCompany, setPostFilterCompany] = useState('')
   const [postFilterStatus, setPostFilterStatus] = useState('')
@@ -61,7 +66,11 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
       fetch('/api/admin/keywords', { headers }).then(r => r.json()),
       fetch('/api/admin/schedule', { headers }).then(r => r.json()),
     ])
-    setCompanies(companiesData.companies ?? [])
+    const companiesList = companiesData.companies ?? []
+    setCompanies(companiesList)
+    if (companiesList.length > 0 && !analyticsCompanyId) {
+      setAnalyticsCompanyId(companiesList[0].id)
+    }
     setPosts(postsData.posts ?? [])
     setCitations(citationsData.citations ?? [])
     setKeywords(keywordsData.keywords ?? [])
@@ -178,6 +187,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
     : keywords
 
   const tabs: { id: Tab; label: string }[] = [
+    { id: 'analytics', label: 'Analytics' },
     { id: 'companies', label: 'Companies' },
     { id: 'posts', label: `Posts${posts.length ? ` (${posts.length})` : ''}` },
     { id: 'keywords', label: `Keywords${keywords.length ? ` (${keywords.length})` : ''}` },
@@ -257,6 +267,44 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
         <div className="text-zinc-500 text-sm">Loading...</div>
       ) : (
         <>
+          {/* ANALYTICS TAB */}
+          {tab === 'analytics' && (
+            <div>
+              {/* Company selector */}
+              <div className="flex items-center gap-3 mb-6">
+                <div className="flex gap-1.5 flex-wrap">
+                  {companies.map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => { setAnalyticsCompanyId(c.id); setAnalyticsKey(k => k + 1) }}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                        analyticsCompanyId === c.id
+                          ? 'border-white text-white bg-zinc-900'
+                          : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
+                      }`}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {analyticsCompanyId ? (
+                <CompanyAnalytics
+                  key={`${analyticsCompanyId}-${analyticsKey}`}
+                  companyId={analyticsCompanyId}
+                  adminKey={adminKey}
+                  onRunRankings={async (cid) => {
+                    await checkRankings(cid)
+                    setAnalyticsKey(k => k + 1)
+                  }}
+                />
+              ) : (
+                <p className="text-zinc-500 text-sm">Select a company above.</p>
+              )}
+            </div>
+          )}
+
           {/* COMPANIES TAB */}
           {tab === 'companies' && (
             <div className="grid gap-4">

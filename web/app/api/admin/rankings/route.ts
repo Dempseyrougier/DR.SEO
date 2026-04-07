@@ -96,6 +96,18 @@ export async function POST(req: NextRequest) {
         .from('keywords')
         .update({ current_rank: newRank })
         .eq('id', keyword.id)
+
+      // Save rank history snapshot (table created via migration)
+      try {
+        await supabase.from('keyword_rank_history').insert({
+          keyword_id: keyword.id,
+          company_id,
+          rank: newRank,
+          checked_at: new Date().toISOString(),
+        })
+      } catch {
+        // Table may not exist yet — non-fatal
+      }
     }
 
     const ranked = updates.filter(u => u.rank !== null)
