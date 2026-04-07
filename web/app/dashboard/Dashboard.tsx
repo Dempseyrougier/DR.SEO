@@ -45,27 +45,26 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
   const [runningSchedule, setRunningSchedule] = useState(false)
   const [scheduleResult, setScheduleResult] = useState('')
 
+  // Filters
+  const [postFilterCompany, setPostFilterCompany] = useState('')
+  const [postFilterStatus, setPostFilterStatus] = useState('')
+  const [kwFilterCompany, setKwFilterCompany] = useState('')
+
   const headers = { 'x-admin-key': adminKey }
 
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const [companiesRes, postsRes, citationsRes] = await Promise.all([
-      fetch('/api/admin/companies', { headers }),
-      fetch('/api/admin/posts', { headers }),
-      fetch('/api/admin/citations', { headers }),
-    ])
-
-    const [companiesData, postsData, citationsData, keywordsData] = await Promise.all([
-      companiesRes.json(),
-      postsRes.json(),
-      citationsRes.json(),
+    const [companiesData, postsData, citationsData, keywordsData, scheduleData] = await Promise.all([
+      fetch('/api/admin/companies', { headers }).then(r => r.json()),
+      fetch('/api/admin/posts', { headers }).then(r => r.json()),
+      fetch('/api/admin/citations', { headers }).then(r => r.json()),
       fetch('/api/admin/keywords', { headers }).then(r => r.json()),
+      fetch('/api/admin/schedule', { headers }).then(r => r.json()),
     ])
     setCompanies(companiesData.companies ?? [])
     setPosts(postsData.posts ?? [])
     setCitations(citationsData.citations ?? [])
     setKeywords(keywordsData.keywords ?? [])
-    const scheduleData = await fetch('/api/admin/schedule', { headers }).then(r => r.json())
     setSchedule(scheduleData.schedule ?? [])
     setLoading(false)
   }, [adminKey])
@@ -92,6 +91,15 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
       method: 'PATCH',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: postId, status }),
+    })
+    fetchData()
+  }
+
+  async function deletePost(postId: string) {
+    if (!window.confirm('Delete this post? This cannot be undone.')) return
+    await fetch(`/api/admin/posts?id=${postId}`, {
+      method: 'DELETE',
+      headers,
     })
     fetchData()
   }
@@ -149,6 +157,26 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
     if (res.ok) fetchData()
   }
 
+  // Derived stats
+  const now = new Date()
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+  const draftCount = posts.filter(p => p.status === 'draft').length
+  const publishedThisMonth = posts.filter(p => p.status === 'published' && new Date(p.created_at) >= startOfMonth).length
+  const top10Count = keywords.filter(k => k.current_rank != null && k.current_rank <= 10).length
+  const dueCount = schedule.filter(s => s.is_due).length
+
+  // Filtered posts
+  const filteredPosts = posts.filter(p => {
+    if (postFilterCompany && p.company_id !== postFilterCompany) return false
+    if (postFilterStatus && p.status !== postFilterStatus) return false
+    return true
+  })
+
+  // Filtered keywords
+  const filteredKeywords = kwFilterCompany
+    ? keywords.filter(k => k.company_id === kwFilterCompany)
+    : keywords
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'companies', label: 'Companies' },
     { id: 'posts', label: `Posts${posts.length ? ` (${posts.length})` : ''}` },
@@ -164,11 +192,13 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
           post={editingPost}
           adminKey={adminKey}
           onClose={() => setEditingPost(null)}
-          onSave={() => { fetchData(); setEditingPost(null) }}
+          onSave={() => fetchData()}
+          onDelete={() => { setEditingPost(null); fetchData() }}
         />
       )}
+
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">DR.SEO</h1>
           <p className="text-sm text-zinc-500 mt-0.5">AI-powered SEO platform</p>
@@ -180,6 +210,23 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
           Refresh
         </button>
       </div>
+
+      {/* Stats bar */}
+      {!loading && (
+        <div className="grid grid-cols-4 gap-3 mb-6">
+          {[
+            { label: 'Drafts', value: draftCount, color: 'text-zinc-300' },
+            { label: 'Published this month', value: publishedThisMonth, color: 'text-green-400' },
+            { label: 'Keywords in top 10', value: top10Count, color: 'text-blue-400' },
+            { label: 'Companies due', value: dueCount, color: dueCount > 0 ? 'text-orange-400' : 'text-zinc-600' },
+          ].map(stat => (
+            <div key={stat.label} className="rounded-xl border border-zinc-800 px-4 py-3">
+              <p className={`text-2xl font-semibold ${stat.color}`}>{stat.value}</p>
+              <p className="text-xs text-zinc-600 mt-0.5">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-zinc-800 pb-0">
@@ -205,175 +252,240 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
           {/* COMPANIES TAB */}
           {tab === 'companies' && (
             <div className="grid gap-4">
-              {companies.map(company => (
-                <div key={company.id} className="rounded-xl border border-zinc-800 p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <h2 className="font-semibold">{company.name}</h2>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
-                          {company.cms_type}
-                        </span>
-                        {!company.active && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-red-900/40 text-red-400">
-                            inactive
+              {companies.map(company => {
+                const companyPosts = posts.filter(p => p.company_id === company.id)
+                const companyKeywords = keywords.filter(k => k.company_id === company.id)
+                const companyDrafts = companyPosts.filter(p => p.status === 'draft').length
+                const companyPublished = companyPosts.filter(p => p.status === 'published').length
+                const companyTop10 = companyKeywords.filter(k => k.current_rank != null && k.current_rank <= 10).length
+                const sched = schedule.find(s => s.company_id === company.id)
+
+                return (
+                  <div key={company.id} className="rounded-xl border border-zinc-800 p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h2 className="font-semibold">{company.name}</h2>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
+                            {company.cms_type}
                           </span>
+                          {!company.active && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-900/40 text-red-400">
+                              inactive
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-zinc-400">{company.domain}</p>
+                        <p className="text-xs text-zinc-600 mt-1">{company.industry}</p>
+                        {/* Per-company stats */}
+                        <div className="flex gap-4 mt-3 text-xs text-zinc-500">
+                          <span>{companyDrafts} draft{companyDrafts !== 1 ? 's' : ''}</span>
+                          <span>{companyPublished} published</span>
+                          <span>{companyKeywords.length} keywords</span>
+                          {companyTop10 > 0 && <span className="text-green-400">{companyTop10} top-10</span>}
+                          {sched && (
+                            sched.is_due
+                              ? <span className="text-orange-400 font-medium">● due now</span>
+                              : <span>due in {sched.days_until_due}d</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-2 shrink-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-zinc-500">Auto-publish</span>
+                          <button
+                            onClick={() => toggleAutoPublish(company.id, company.auto_publish)}
+                            className={`w-10 h-5 rounded-full transition-colors relative ${
+                              company.auto_publish ? 'bg-green-600' : 'bg-zinc-700'
+                            }`}
+                          >
+                            <span
+                              className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                                company.auto_publish ? 'translate-x-5' : 'translate-x-0.5'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                        <span className="text-xs text-zinc-500">{company.posts_per_week}x/week</span>
+                      </div>
+                    </div>
+                    {company.voice_guidelines && (
+                      <p className="text-xs text-zinc-600 mt-3 border-t border-zinc-800 pt-3 line-clamp-2">
+                        {company.voice_guidelines}
+                      </p>
+                    )}
+                    <div className="mt-4 border-t border-zinc-800 pt-4">
+                      {/* Writer controls */}
+                      <div className="mb-3">
+                        <button
+                          onClick={() => setWriterExpanded(prev => ({ ...prev, [company.id]: !prev[company.id] }))}
+                          className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition-colors"
+                        >
+                          <span>{writerExpanded[company.id] ? '▾' : '▸'}</span>
+                          Writer options
+                        </button>
+                        {writerExpanded[company.id] && (
+                          <div className="mt-2 flex flex-col gap-2">
+                            <textarea
+                              value={writerPrompt[company.id] ?? ''}
+                              onChange={e => setWriterPrompt(prev => ({ ...prev, [company.id]: e.target.value }))}
+                              placeholder="Topic or prompt (optional) — e.g. 'write about sunset sailing charters for bachelorette parties'"
+                              rows={2}
+                              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
+                            />
+                            <input
+                              type="url"
+                              value={writerUrl[company.id] ?? ''}
+                              onChange={e => setWriterUrl(prev => ({ ...prev, [company.id]: e.target.value }))}
+                              placeholder="Reference URL (optional) — Claude will read this page for inspiration"
+                              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                            />
+                          </div>
                         )}
                       </div>
-                      <p className="text-sm text-zinc-400">{company.domain}</p>
-                      <p className="text-xs text-zinc-600 mt-1">{company.industry}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-2 shrink-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-zinc-500">Auto-publish</span>
+                      <div className="flex gap-2">
                         <button
-                          onClick={() => toggleAutoPublish(company.id, company.auto_publish)}
-                          className={`w-10 h-5 rounded-full transition-colors relative ${
-                            company.auto_publish ? 'bg-green-600' : 'bg-zinc-700'
-                          }`}
+                          onClick={() => runAgent('writer', company.id, {
+                            prompt: writerPrompt[company.id] || undefined,
+                            url: writerUrl[company.id] || undefined,
+                          })}
+                          disabled={agentRunning === `writer:${company.id}`}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
                         >
-                          <span
-                            className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                              company.auto_publish ? 'translate-x-5' : 'translate-x-0.5'
-                            }`}
-                          />
+                          {agentRunning === `writer:${company.id}` ? 'Writing...' : 'Write Post'}
+                        </button>
+                        <button
+                          onClick={() => runAgent('citation', company.id)}
+                          disabled={agentRunning === `citation:${company.id}`}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                        >
+                          {agentRunning === `citation:${company.id}` ? 'Checking...' : 'Check Citations'}
                         </button>
                       </div>
-                      <span className="text-xs text-zinc-500">{company.posts_per_week}x/week</span>
-                    </div>
-                  </div>
-                  {company.voice_guidelines && (
-                    <p className="text-xs text-zinc-600 mt-3 border-t border-zinc-800 pt-3 line-clamp-2">
-                      {company.voice_guidelines}
-                    </p>
-                  )}
-                  <div className="mt-4 border-t border-zinc-800 pt-4">
-                    {/* Writer controls */}
-                    <div className="mb-3">
-                      <button
-                        onClick={() => setWriterExpanded(prev => ({ ...prev, [company.id]: !prev[company.id] }))}
-                        className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition-colors"
-                      >
-                        <span>{writerExpanded[company.id] ? '▾' : '▸'}</span>
-                        Writer options
-                      </button>
-                      {writerExpanded[company.id] && (
-                        <div className="mt-2 flex flex-col gap-2">
-                          <textarea
-                            value={writerPrompt[company.id] ?? ''}
-                            onChange={e => setWriterPrompt(prev => ({ ...prev, [company.id]: e.target.value }))}
-                            placeholder="Topic or prompt (optional) — e.g. 'write about sunset sailing charters for bachelorette parties'"
-                            rows={2}
-                            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
-                          />
-                          <input
-                            type="url"
-                            value={writerUrl[company.id] ?? ''}
-                            onChange={e => setWriterUrl(prev => ({ ...prev, [company.id]: e.target.value }))}
-                            placeholder="Reference URL (optional) — Claude will read this page for inspiration"
-                            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-                          />
-                        </div>
+                      {agentResult[`writer:${company.id}`] && (
+                        <p className="text-xs text-zinc-400 mt-2">{agentResult[`writer:${company.id}`]}</p>
+                      )}
+                      {agentResult[`citation:${company.id}`] && (
+                        <p className="text-xs text-zinc-400 mt-2">{agentResult[`citation:${company.id}`]}</p>
                       )}
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => runAgent('writer', company.id, {
-                          prompt: writerPrompt[company.id] || undefined,
-                          url: writerUrl[company.id] || undefined,
-                        })}
-                        disabled={agentRunning === `writer:${company.id}`}
-                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                      >
-                        {agentRunning === `writer:${company.id}` ? 'Writing...' : 'Write Post'}
-                      </button>
-                      <button
-                        onClick={() => runAgent('citation', company.id)}
-                        disabled={agentRunning === `citation:${company.id}`}
-                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                      >
-                        {agentRunning === `citation:${company.id}` ? 'Checking...' : 'Check Citations'}
-                      </button>
-                    </div>
-                    {agentResult[`writer:${company.id}`] && (
-                      <p className="text-xs text-zinc-400 mt-2">{agentResult[`writer:${company.id}`]}</p>
-                    )}
-                    {agentResult[`citation:${company.id}`] && (
-                      <p className="text-xs text-zinc-400 mt-2">{agentResult[`citation:${company.id}`]}</p>
-                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
           {/* POSTS TAB */}
           {tab === 'posts' && (
-            <div className="grid gap-4">
-              {posts.length === 0 && (
-                <p className="text-zinc-500 text-sm">No posts yet. Run the writer agent on a company.</p>
-              )}
-              {posts.map(post => (
-                <div key={post.id} className="rounded-xl border border-zinc-800 p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                            post.status === 'published'
-                              ? 'bg-green-900/40 text-green-400'
-                              : post.status === 'approved'
-                              ? 'bg-blue-900/40 text-blue-400'
-                              : post.status === 'failed'
-                              ? 'bg-red-900/40 text-red-400'
-                              : 'bg-zinc-800 text-zinc-400'
-                          }`}
-                        >
-                          {post.status}
-                        </span>
-                        {post.companies && (
-                          <span className="text-xs text-zinc-500">{post.companies.name}</span>
+            <div>
+              {/* Filters */}
+              <div className="flex gap-2 mb-4 flex-wrap">
+                <select
+                  value={postFilterCompany}
+                  onChange={e => setPostFilterCompany(e.target.value)}
+                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500"
+                >
+                  <option value="">All companies</option>
+                  {companies.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={postFilterStatus}
+                  onChange={e => setPostFilterStatus(e.target.value)}
+                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500"
+                >
+                  <option value="">All statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="approved">Approved</option>
+                  <option value="published">Published</option>
+                  <option value="failed">Failed</option>
+                </select>
+                {(postFilterCompany || postFilterStatus) && (
+                  <button
+                    onClick={() => { setPostFilterCompany(''); setPostFilterStatus('') }}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  >
+                    Clear filters
+                  </button>
+                )}
+                <span className="text-xs text-zinc-600 self-center ml-auto">
+                  {filteredPosts.length} of {posts.length} posts
+                </span>
+              </div>
+
+              <div className="grid gap-4">
+                {filteredPosts.length === 0 && (
+                  <p className="text-zinc-500 text-sm">No posts match the current filters.</p>
+                )}
+                {filteredPosts.map(post => (
+                  <div key={post.id} className="rounded-xl border border-zinc-800 p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              post.status === 'published'
+                                ? 'bg-green-900/40 text-green-400'
+                                : post.status === 'approved'
+                                ? 'bg-blue-900/40 text-blue-400'
+                                : post.status === 'failed'
+                                ? 'bg-red-900/40 text-red-400'
+                                : 'bg-zinc-800 text-zinc-400'
+                            }`}
+                          >
+                            {post.status}
+                          </span>
+                          {post.companies && (
+                            <span className="text-xs text-zinc-500">{post.companies.name}</span>
+                          )}
+                          {post.target_keyword && (
+                            <span className="text-xs text-zinc-600">#{post.target_keyword}</span>
+                          )}
+                        </div>
+                        <h3 className="font-medium text-sm leading-snug">{post.title}</h3>
+                        {post.meta_description && (
+                          <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{post.meta_description}</p>
                         )}
-                        {post.target_keyword && (
-                          <span className="text-xs text-zinc-600">#{post.target_keyword}</span>
-                        )}
+                        <p className="text-xs text-zinc-700 mt-1">
+                          {new Date(post.created_at).toLocaleDateString()}
+                        </p>
                       </div>
-                      <h3 className="font-medium text-sm leading-snug">{post.title}</h3>
-                      {post.meta_description && (
-                        <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{post.meta_description}</p>
-                      )}
-                      <p className="text-xs text-zinc-700 mt-1">
-                        {new Date(post.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-1.5 shrink-0">
-                      <button
-                        onClick={() => setEditingPost(post)}
-                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
-                      >
-                        Edit
-                      </button>
-                      {post.status === 'draft' && (
+                      <div className="flex flex-col gap-1.5 shrink-0">
                         <button
-                          onClick={() => updatePostStatus(post.id, 'approved')}
-                          className="text-xs px-3 py-1.5 rounded-lg bg-blue-900/40 hover:bg-blue-900/60 text-blue-400 transition-colors"
+                          onClick={() => setEditingPost(post)}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
                         >
-                          Approve
+                          Edit
                         </button>
-                      )}
-                      {post.status === 'approved' && (
+                        {post.status === 'draft' && (
+                          <button
+                            onClick={() => updatePostStatus(post.id, 'approved')}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-blue-900/40 hover:bg-blue-900/60 text-blue-400 transition-colors"
+                          >
+                            Approve
+                          </button>
+                        )}
+                        {post.status === 'approved' && (
+                          <button
+                            onClick={() => runAgent('publisher', post.id)}
+                            disabled={agentRunning === `publisher:${post.id}`}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-green-900/40 hover:bg-green-900/60 text-green-400 disabled:opacity-50 transition-colors"
+                          >
+                            {agentRunning === `publisher:${post.id}` ? 'Publishing...' : 'Publish'}
+                          </button>
+                        )}
                         <button
-                          onClick={() => runAgent('publisher', post.id)}
-                          disabled={agentRunning === `publisher:${post.id}`}
-                          className="text-xs px-3 py-1.5 rounded-lg bg-green-900/40 hover:bg-green-900/60 text-green-400 disabled:opacity-50 transition-colors"
+                          onClick={() => deletePost(post.id)}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-red-900 text-zinc-600 hover:text-red-500 transition-colors"
                         >
-                          {agentRunning === `publisher:${post.id}` ? 'Publishing...' : 'Publish'}
+                          Delete
                         </button>
-                      )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
 
@@ -434,8 +546,23 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                 ))}
               </div>
 
-              {keywords.length === 0 ? (
-                <p className="text-zinc-500 text-sm">No keywords yet. Click a Research button above to find opportunities.</p>
+              {/* Company filter for keyword table */}
+              <div className="flex items-center gap-2 mb-3">
+                <select
+                  value={kwFilterCompany}
+                  onChange={e => setKwFilterCompany(e.target.value)}
+                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500"
+                >
+                  <option value="">All companies</option>
+                  {companies.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <span className="text-xs text-zinc-600 ml-auto">{filteredKeywords.length} keywords</span>
+              </div>
+
+              {filteredKeywords.length === 0 ? (
+                <p className="text-zinc-500 text-sm">No keywords yet. Click Research Keywords above to find opportunities.</p>
               ) : (
                 <div className="rounded-xl border border-zinc-800 overflow-hidden">
                   <table className="w-full text-sm">
@@ -451,7 +578,7 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {keywords.map((kw, i) => {
+                      {filteredKeywords.map((kw, i) => {
                         const company = companies.find(c => c.id === kw.company_id)
                         const diff = kw.difficulty ?? 0
                         const diffColor = diff < 30 ? 'text-green-400' : diff < 60 ? 'text-yellow-400' : 'text-red-400'
@@ -486,13 +613,11 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                             <td className="px-4 py-3 text-right">
                               {kw.status === 'tracking' && (
                                 <button
-                                  onClick={() => {
-                                    setWriterPrompt(prev => ({ ...prev, [kw.company_id]: `write about "${kw.keyword}"` }))
-                                    setTab('companies')
-                                  }}
-                                  className="text-xs px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+                                  onClick={() => runAgent('writer', kw.company_id, { prompt: `write about "${kw.keyword}"` })}
+                                  disabled={agentRunning === `writer:${kw.company_id}`}
+                                  className="text-xs px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-50 transition-colors"
                                 >
-                                  Write Post
+                                  {agentRunning === `writer:${kw.company_id}` ? 'Writing...' : 'Write Post'}
                                 </button>
                               )}
                             </td>
@@ -561,26 +686,34 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                 {
                   id: 'writer',
                   name: 'Blog Writer',
-                  description: 'Generates SEO-optimized blog posts for each company using their voice guidelines and target keywords.',
+                  description: 'Picks the best untargeted keyword via DataForSEO, analyzes SERP intent, then writes a fully structured SEO post with schema markup using Claude Opus.',
                   action: 'Run for all companies',
+                  available: true,
                 },
                 {
                   id: 'citation',
                   name: 'Citation Monitor',
-                  description: 'Checks ChatGPT, Perplexity, and Google AI to see if your brands are being cited in AI search responses.',
+                  description: 'Searches Google for brand mentions and AI citation signals across the web. Logs results per company to track brand visibility over time.',
                   action: 'Check all brands',
+                  available: true,
                 },
                 {
                   id: 'refresh',
                   name: 'Content Refresh',
-                  description: 'Scans for outdated or underperforming pages and queues them for rewriting.',
+                  description: 'Scans for underperforming posts and queues them for rewriting to recover lost rankings.',
                   action: 'Scan all sites',
+                  available: false,
                 },
               ].map(agent => (
                 <div key={agent.id} className="rounded-xl border border-zinc-800 p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="font-semibold mb-1">{agent.name}</h3>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-semibold">{agent.name}</h3>
+                        {!agent.available && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-500">coming soon</span>
+                        )}
+                      </div>
                       <p className="text-sm text-zinc-400">{agent.description}</p>
                       {agentResult[agent.id] && (
                         <p className="text-xs text-zinc-400 mt-2 bg-zinc-900 rounded-lg px-3 py-2">
@@ -589,8 +722,8 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                       )}
                     </div>
                     <button
-                      onClick={() => runAgent(agent.id)}
-                      disabled={agentRunning === agent.id}
+                      onClick={() => agent.available && runAgent(agent.id)}
+                      disabled={agentRunning === agent.id || !agent.available}
                       className="shrink-0 text-xs px-4 py-2 rounded-lg bg-white text-black font-semibold hover:bg-zinc-200 disabled:opacity-50 transition-colors"
                     >
                       {agentRunning === agent.id ? 'Running...' : agent.action}

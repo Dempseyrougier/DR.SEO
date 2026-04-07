@@ -23,11 +23,13 @@ export default function PostEditor({
   adminKey,
   onClose,
   onSave,
+  onDelete,
 }: {
   post: Post
   adminKey: string
   onClose: () => void
   onSave: () => void
+  onDelete: () => void
 }) {
   const [title, setTitle] = useState(post.title)
   const [meta, setMeta] = useState(post.meta_description ?? '')
@@ -35,6 +37,7 @@ export default function PostEditor({
   const [content, setContent] = useState(post.content)
   const [preview, setPreview] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [enhancing, setEnhancing] = useState<string | null>(null)
   const [images, setImages] = useState<UnsplashImage[]>([])
   const [message, setMessage] = useState('')
@@ -42,9 +45,20 @@ export default function PostEditor({
 
   const headers = { 'x-admin-key': adminKey, 'Content-Type': 'application/json' }
 
+  const isDirty =
+    title !== post.title ||
+    meta !== (post.meta_description ?? '') ||
+    keyword !== (post.target_keyword ?? '') ||
+    content !== post.content
+
   function notify(msg: string, type: 'ok' | 'error' = 'ok') {
     setMessage(msg)
     setMessageType(type)
+  }
+
+  function handleClose() {
+    if (isDirty && !window.confirm('You have unsaved changes. Discard them?')) return
+    onClose()
   }
 
   async function save() {
@@ -66,6 +80,21 @@ export default function PostEditor({
       onSave()
     } else {
       notify('Save failed.', 'error')
+    }
+  }
+
+  async function deletePost() {
+    if (!window.confirm('Delete this post? This cannot be undone.')) return
+    setDeleting(true)
+    const res = await fetch(`/api/admin/posts?id=${post.id}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-key': adminKey },
+    })
+    setDeleting(false)
+    if (res.ok) {
+      onDelete()
+    } else {
+      notify('Delete failed.', 'error')
     }
   }
 
@@ -119,7 +148,7 @@ export default function PostEditor({
         <div className="flex items-center justify-between mb-6 sticky top-0 bg-zinc-950 py-3 -mx-6 px-6 border-b border-zinc-800 z-10">
           <div className="flex items-center gap-3">
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="text-zinc-500 hover:text-zinc-200 text-sm transition-colors"
             >
               ← Back
@@ -129,8 +158,18 @@ export default function PostEditor({
               {post.status}
             </span>
             <span className="text-xs text-zinc-600">{wordCount.toLocaleString()} words</span>
+            {isDirty && (
+              <span className="text-xs text-amber-500">● unsaved</span>
+            )}
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={deletePost}
+              disabled={deleting}
+              className="text-xs px-3 py-1.5 rounded-lg border border-red-900 hover:border-red-700 text-red-500 hover:text-red-400 disabled:opacity-50 transition-colors"
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </button>
             <button
               onClick={() => { setPreview(!preview); setImages([]) }}
               className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 text-zinc-400 hover:text-zinc-200 transition-colors"
@@ -139,7 +178,7 @@ export default function PostEditor({
             </button>
             <button
               onClick={save}
-              disabled={saving}
+              disabled={saving || !isDirty}
               className="text-xs px-4 py-1.5 rounded-lg bg-white text-black font-semibold hover:bg-zinc-200 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Saving...' : 'Save'}
@@ -268,20 +307,29 @@ export default function PostEditor({
         )}
 
         {/* Bottom save */}
-        <div className="flex justify-end mt-4 gap-2">
+        <div className="flex justify-between mt-4 gap-2">
           <button
-            onClick={onClose}
-            className="text-xs px-4 py-2 rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
+            onClick={deletePost}
+            disabled={deleting}
+            className="text-xs px-4 py-2 rounded-lg border border-red-900 hover:border-red-700 text-red-500 hover:text-red-400 disabled:opacity-50 transition-colors"
           >
-            Cancel
+            {deleting ? 'Deleting...' : 'Delete Post'}
           </button>
-          <button
-            onClick={save}
-            disabled={saving}
-            className="text-xs px-6 py-2 rounded-lg bg-white text-black font-semibold hover:bg-zinc-200 disabled:opacity-50 transition-colors"
-          >
-            {saving ? 'Saving...' : 'Save Changes'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleClose}
+              className="text-xs px-4 py-2 rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Close
+            </button>
+            <button
+              onClick={save}
+              disabled={saving || !isDirty}
+              className="text-xs px-6 py-2 rounded-lg bg-white text-black font-semibold hover:bg-zinc-200 disabled:opacity-50 transition-colors"
+            >
+              {saving ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
         </div>
 
       </div>
