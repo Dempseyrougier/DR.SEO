@@ -32,6 +32,8 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
   const [editingPost, setEditingPost] = useState<Post | null>(null)
   const [researchingKeywords, setResearchingKeywords] = useState<string | null>(null)
   const [researchResult, setResearchResult] = useState<Record<string, string>>({})
+  const [checkingRankings, setCheckingRankings] = useState<string | null>(null)
+  const [rankingResult, setRankingResult] = useState<Record<string, string>>({})
 
   const headers = { 'x-admin-key': adminKey }
 
@@ -89,6 +91,20 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
       body: JSON.stringify({ id: companyId, auto_publish: !current }),
     })
     fetchData()
+  }
+
+  async function checkRankings(companyId: string) {
+    setCheckingRankings(companyId)
+    setRankingResult(prev => ({ ...prev, [companyId]: '' }))
+    const res = await fetch('/api/admin/rankings', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company_id: companyId }),
+    })
+    const data = await res.json()
+    setRankingResult(prev => ({ ...prev, [companyId]: data.message ?? data.error ?? 'Done' }))
+    setCheckingRankings(null)
+    if (res.ok) fetchData()
   }
 
   async function researchKeywords(companyId: string) {
@@ -336,19 +352,32 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
           {/* KEYWORDS TAB */}
           {tab === 'keywords' && (
             <div>
-              {/* Research buttons per company */}
-              <div className="flex gap-2 mb-6 flex-wrap">
+              {/* Action buttons per company */}
+              <div className="flex flex-col gap-3 mb-6">
                 {companies.map(company => (
-                  <div key={company.id} className="flex flex-col gap-1">
-                    <button
-                      onClick={() => researchKeywords(company.id)}
-                      disabled={researchingKeywords === company.id}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                    >
-                      {researchingKeywords === company.id ? 'Researching...' : `Research ${company.name}`}
-                    </button>
+                  <div key={company.id} className="rounded-xl border border-zinc-800 p-4">
+                    <p className="text-sm font-medium mb-3">{company.name}</p>
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        onClick={() => researchKeywords(company.id)}
+                        disabled={researchingKeywords === company.id}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                      >
+                        {researchingKeywords === company.id ? 'Researching...' : '🔍 Research Keywords'}
+                      </button>
+                      <button
+                        onClick={() => checkRankings(company.id)}
+                        disabled={checkingRankings === company.id}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                      >
+                        {checkingRankings === company.id ? 'Checking...' : '📈 Check Rankings'}
+                      </button>
+                    </div>
                     {researchResult[company.id] && (
-                      <span className="text-xs text-zinc-500">{researchResult[company.id]}</span>
+                      <p className="text-xs text-zinc-500 mt-2">{researchResult[company.id]}</p>
+                    )}
+                    {rankingResult[company.id] && (
+                      <p className="text-xs text-zinc-400 mt-2">{rankingResult[company.id]}</p>
                     )}
                   </div>
                 ))}
@@ -365,6 +394,7 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                         <th className="text-left px-4 py-3 font-medium">Company</th>
                         <th className="text-right px-4 py-3 font-medium">Volume</th>
                         <th className="text-right px-4 py-3 font-medium">Difficulty</th>
+                        <th className="text-right px-4 py-3 font-medium">Rank</th>
                         <th className="text-left px-4 py-3 font-medium">Status</th>
                         <th className="px-4 py-3" />
                       </tr>
@@ -383,6 +413,15 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                             </td>
                             <td className={`px-4 py-3 text-right font-medium ${diffColor}`}>
                               {kw.difficulty != null ? `${kw.difficulty}/100` : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              {kw.current_rank != null ? (
+                                <span className={`font-medium ${kw.current_rank <= 10 ? 'text-green-400' : kw.current_rank <= 30 ? 'text-yellow-400' : 'text-zinc-400'}`}>
+                                  #{kw.current_rank}
+                                </span>
+                              ) : (
+                                <span className="text-zinc-700">—</span>
+                              )}
                             </td>
                             <td className="px-4 py-3">
                               <span className={`text-xs px-2 py-0.5 rounded-full ${
