@@ -298,6 +298,14 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                     await checkRankings(cid)
                     setAnalyticsKey(k => k + 1)
                   }}
+                  onSavePropertyId={async (cid, propertyId) => {
+                    await fetch('/api/admin/companies', {
+                      method: 'PATCH',
+                      headers: { ...headers, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ id: cid, ga4_property_id: propertyId }),
+                    })
+                    fetchData()
+                  }}
                 />
               ) : (
                 <p className="text-zinc-500 text-sm">Select a company above.</p>

@@ -15,6 +15,7 @@ export type Company = {
   wp_app_password: string | null
   location_code: number
   money_page_url: string | null
+  ga4_property_id: string | null
   active: boolean
   created_at: string
 }
