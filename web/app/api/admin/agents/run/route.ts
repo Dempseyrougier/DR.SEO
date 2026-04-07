@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '../../../../../lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 
+export const maxDuration = 60
+
 function auth(req: NextRequest) {
   return req.headers.get('x-admin-key') === process.env.ADMIN_KEY
 }
@@ -19,38 +21,89 @@ async function runWriter(companyId: string) {
 
   if (!company) return { error: 'Company not found' }
 
-  const systemPrompt = `You are an expert SEO content writer. Write a comprehensive, engaging blog post optimized for search engines.
-Voice guidelines for ${company.name}: ${company.voice_guidelines ?? 'Professional and informative.'}
-Industry: ${company.industry}
-${company.target_keywords?.length ? `Target keywords: ${company.target_keywords.join(', ')}` : ''}
+  // Fetch existing posts to avoid keyword cannibalization
+  const { data: existingPosts } = await supabase
+    .from('posts')
+    .select('title, target_keyword')
+    .eq('company_id', companyId)
+    .in('status', ['draft', 'approved', 'published'])
 
-Return ONLY valid JSON with these fields:
+  const existingTopics = existingPosts?.length
+    ? existingPosts
+        .map(p => `- "${p.title}"${p.target_keyword ? ` (keyword: ${p.target_keyword})` : ''}`)
+        .join('\n')
+    : 'None yet.'
+
+  const targetKeywords = company.target_keywords?.length
+    ? company.target_keywords.join(', ')
+    : 'general industry terms'
+
+  const systemPrompt = `You are a senior SEO content strategist and writer. Your posts consistently rank on page 1 of Google.
+
+## Company
+Name: ${company.name}
+Domain: ${company.domain}
+Industry: ${company.industry}
+Voice guidelines: ${company.voice_guidelines ?? 'Professional and informative.'}
+Target keywords to draw from: ${targetKeywords}
+
+## Existing posts (DO NOT target these same keywords or topics)
+${existingTopics}
+
+## Content requirements
+- Choose ONE primary keyword that:
+  - Is NOT already covered by existing posts above
+  - Has clear commercial or informational search intent
+  - Is specific enough to realistically rank for (long-tail preferred)
+- Word count: 1,500–2,000 words
+- Structure: H1 title, 4–6 H2 sections, H3 subsections where appropriate
+- Include a FAQ section at the end (4–5 questions with direct answers)
+- Weave in 3–5 secondary/related keywords naturally throughout
+- Write with E-E-A-T in mind: demonstrate real expertise, include specific details, data points, or examples — no generic filler
+- End with a clear call-to-action relevant to the business
+- Match the brand voice guidelines exactly
+
+## HTML output requirements
+- Use semantic HTML: <h2>, <h3>, <p>, <ul>, <ol>, <strong>
+- Add a FAQ schema JSON-LD <script> block at the very end of the content covering the FAQ questions
+- Add [INTERNAL_LINK: suggested topic] placeholders where internal links would strengthen the post
+- Do NOT include <html>, <head>, or <body> tags — content only
+
+## Response format
+Return ONLY valid JSON — no markdown, no commentary:
 {
-  "title": "...",
-  "content": "... (full HTML blog post, 800-1200 words) ...",
-  "meta_description": "... (150-160 chars) ...",
-  "target_keyword": "... (primary keyword) ..."
+  "title": "exact H1 title (include primary keyword near the front)",
+  "target_keyword": "primary keyword phrase",
+  "secondary_keywords": ["kw1", "kw2", "kw3"],
+  "meta_description": "compelling 150–160 char meta description with primary keyword",
+  "content": "full HTML content as a single string"
 }`
 
   const message = await anthropic.messages.create({
     model: 'claude-opus-4-6',
-    max_tokens: 4096,
+    max_tokens: 8192,
     messages: [
       {
         role: 'user',
-        content: `Write an SEO blog post for ${company.name} (${company.domain}). Focus on ${company.industry}. Make it genuinely useful and optimized for organic search.`,
+        content: `Write the next SEO blog post for ${company.name}. Choose a keyword angle not covered by the existing posts listed above. Make it genuinely useful — the kind of content that earns backlinks and ranks.`,
       },
     ],
     system: systemPrompt,
   })
 
   const text = message.content[0].type === 'text' ? message.content[0].text : ''
-  let parsed: { title: string; content: string; meta_description: string; target_keyword: string }
+  let parsed: {
+    title: string
+    target_keyword: string
+    secondary_keywords: string[]
+    meta_description: string
+    content: string
+  }
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     parsed = JSON.parse(jsonMatch?.[0] ?? text)
   } catch {
-    return { error: 'Failed to parse writer output' }
+    return { error: 'Failed to parse writer output. Raw: ' + text.slice(0, 200) }
   }
 
   const { error } = await supabase.from('posts').insert({
@@ -63,7 +116,9 @@ Return ONLY valid JSON with these fields:
   })
 
   if (error) return { error: error.message }
-  return { message: `Post "${parsed.title}" created as ${company.auto_publish ? 'approved' : 'draft'}.` }
+  return {
+    message: `Post "${parsed.title}" created as ${company.auto_publish ? 'approved' : 'draft'}. Keywords: ${parsed.target_keyword}${parsed.secondary_keywords?.length ? `, ${parsed.secondary_keywords.join(', ')}` : ''}.`,
+  }
 }
 
 async function runCitationCheck(companyId: string) {
