@@ -19,12 +19,13 @@ export async function POST(req: NextRequest) {
   const { company_id } = await req.json()
   const supabase = getSupabaseAdmin()
 
-  const { data: company } = await supabase
+  const { data: company, error: companyError } = await supabase
     .from('companies')
     .select('name, domain, location_code')
     .eq('id', company_id)
     .single()
 
+  if (companyError) return NextResponse.json({ error: `DB error: ${companyError.message}` }, { status: 500 })
   if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 })
 
   // Get keywords that need rank checking (tracking or content_planned)
