@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
 
     // Phase 3: save relevant ranked keywords (with live positions)
     if (relevant.length > 0) {
-      const { error: insertError } = await supabase.from('keywords').insert(
+      const { error: insertError } = await supabase.from('keywords').upsert(
         relevant.map(k => ({
           company_id,
           keyword: k.keyword,
@@ -131,13 +131,10 @@ export async function POST(req: NextRequest) {
           difficulty: k.difficulty,
           current_rank: k.rank,
           status: 'tracking',
-        }))
+        })),
+        { onConflict: 'company_id,keyword' }
       )
       if (insertError) return NextResponse.json({ error: `Failed to save keywords: ${insertError.message}` }, { status: 500 })
-
-      // Verify actual DB count
-      const { count } = await supabase.from('keywords').select('*', { count: 'exact', head: true }).eq('company_id', company_id)
-      if (!count || count === 0) return NextResponse.json({ error: 'Keywords were processed but none were saved to the database. Check that the keywords table has all required columns (id, company_id, keyword, search_volume, difficulty, current_rank, status).' }, { status: 500 })
 
       // Write initial rank history snapshot
       const rankHistoryRows = relevant.map(k => {
@@ -164,14 +161,15 @@ export async function POST(req: NextRequest) {
       const relevantIdeas = freshIdeas.filter(k => ideaRelevantSet.has(k.keyword.toLowerCase()))
 
       if (relevantIdeas.length > 0) {
-        const { error: ideaInsertError } = await supabase.from('keywords').insert(
+        const { error: ideaInsertError } = await supabase.from('keywords').upsert(
           relevantIdeas.map(k => ({
             company_id,
             keyword: k.keyword,
             search_volume: k.searchVolume,
             difficulty: k.difficulty,
             status: 'tracking',
-          }))
+          })),
+          { onConflict: 'company_id,keyword' }
         )
         if (!ideaInsertError) ideaCount = relevantIdeas.length
       }
