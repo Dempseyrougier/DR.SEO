@@ -122,7 +122,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
     fetchData()
   }
 
-  async function checkRankings(companyId: string) {
+  async function checkRankings(companyId: string): Promise<string> {
     setCheckingRankings(companyId)
     setRankingResult(prev => ({ ...prev, [companyId]: '' }))
     const res = await fetch('/api/admin/rankings', {
@@ -131,9 +131,11 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
       body: JSON.stringify({ company_id: companyId }),
     })
     const data = await res.json()
-    setRankingResult(prev => ({ ...prev, [companyId]: data.message ?? data.error ?? 'Done' }))
+    const msg = data.message ?? data.error ?? 'Done'
+    setRankingResult(prev => ({ ...prev, [companyId]: msg }))
     setCheckingRankings(null)
     if (res.ok) fetchData()
+    return msg
   }
 
   async function analyzeCompetitor(companyId: string) {
@@ -295,8 +297,9 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                   companyId={analyticsCompanyId}
                   adminKey={adminKey}
                   onRunRankings={async (cid) => {
-                    await checkRankings(cid)
+                    const msg = await checkRankings(cid)
                     setAnalyticsKey(k => k + 1)
+                    return msg
                   }}
                   onSavePropertyId={async (cid, propertyId) => {
                     await fetch('/api/admin/companies', {

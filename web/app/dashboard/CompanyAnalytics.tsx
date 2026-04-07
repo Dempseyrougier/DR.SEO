@@ -165,7 +165,7 @@ export default function CompanyAnalytics({
 }: {
   companyId: string
   adminKey: string
-  onRunRankings: (companyId: string) => void
+  onRunRankings: (companyId: string) => Promise<string>
   onSavePropertyId: (companyId: string, propertyId: string) => Promise<void>
 }) {
   const [data, setData] = useState<AnalyticsData | null>(null)
@@ -178,6 +178,8 @@ export default function CompanyAnalytics({
   const [error, setError] = useState('')
   const [propertyIdInput, setPropertyIdInput] = useState('')
   const [savingPropertyId, setSavingPropertyId] = useState(false)
+  const [rankingRunning, setRankingRunning] = useState(false)
+  const [rankingMessage, setRankingMessage] = useState('')
 
   const headers = { 'x-admin-key': adminKey }
 
@@ -254,12 +256,24 @@ export default function CompanyAnalytics({
           <h2 className="font-semibold text-lg">{company.name}</h2>
           <p className="text-xs text-zinc-500">{company.domain} · {company.industry}</p>
         </div>
-        <button
-          onClick={() => onRunRankings(companyId)}
-          className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-colors"
-        >
-          Refresh Rankings
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            disabled={rankingRunning}
+            onClick={async () => {
+              setRankingRunning(true)
+              setRankingMessage('')
+              const msg = await onRunRankings(companyId)
+              setRankingMessage(msg)
+              setRankingRunning(false)
+            }}
+            className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+          >
+            {rankingRunning ? 'Checking...' : 'Refresh Rankings'}
+          </button>
+          {rankingMessage && (
+            <p className="text-xs text-zinc-500 max-w-xs text-right">{rankingMessage}</p>
+          )}
+        </div>
       </div>
 
       {/* GA4 Property ID bar */}
