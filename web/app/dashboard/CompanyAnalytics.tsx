@@ -243,6 +243,27 @@ export default function CompanyAnalytics({
         </button>
       </div>
 
+      {/* GA4 Property ID — always visible settings row */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 flex items-center gap-3">
+        <span className="text-xs text-zinc-500 shrink-0">GA4 Property ID</span>
+        <input
+          value={propertyIdInput || company.ga4_property_id || ''}
+          onChange={e => setPropertyIdInput(e.target.value)}
+          placeholder="e.g. 123456789  — find this in GA4 → Admin → Property Settings"
+          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+        />
+        <button
+          onClick={savePropertyId}
+          disabled={savingPropertyId || !propertyIdInput.trim()}
+          className="text-xs px-3 py-1.5 rounded-lg bg-white text-black font-semibold disabled:opacity-40 hover:bg-zinc-200 transition-colors shrink-0"
+        >
+          {savingPropertyId ? 'Saving...' : company.ga4_property_id ? 'Update' : 'Connect'}
+        </button>
+        {company.ga4_property_id && !propertyIdInput && (
+          <span className="text-xs text-green-400 shrink-0">● Connected</span>
+        )}
+      </div>
+
       {/* ── SEARCH CONSOLE SECTION ───────────────────────────────────────────── */}
       <div>
         <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">Search Performance (Google Search Console)</h3>
@@ -341,31 +362,8 @@ export default function CompanyAnalytics({
         <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">Traffic (Google Analytics 4)</h3>
 
         {!company.ga4_property_id && !ga4Ready ? (
-          <div className="space-y-3">
-            <ConnectCard
-              title="Connect Google Analytics 4"
-              steps={[
-                'Go to analytics.google.com → Admin → Property Settings',
-                'Copy your Property ID (e.g. 123456789)',
-                'Add the service account email as Viewer in GA4 Property Access Management',
-                'Paste the Property ID below and save',
-              ]}
-            />
-            <div className="flex gap-2">
-              <input
-                value={propertyIdInput}
-                onChange={e => setPropertyIdInput(e.target.value)}
-                placeholder="GA4 Property ID (e.g. 123456789)"
-                className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-              />
-              <button
-                onClick={savePropertyId}
-                disabled={savingPropertyId || !propertyIdInput.trim()}
-                className="text-xs px-4 py-2 rounded-lg bg-white text-black font-semibold disabled:opacity-50 hover:bg-zinc-200 transition-colors"
-              >
-                {savingPropertyId ? 'Saving...' : 'Save'}
-              </button>
-            </div>
+          <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-500">
+            Enter your GA4 Property ID in the field above to connect Google Analytics.
           </div>
         ) : ga4Loading ? (
           <div className="rounded-xl border border-zinc-800 p-6 text-center text-zinc-600 text-xs animate-pulse">Loading GA4 data...</div>

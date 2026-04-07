@@ -190,6 +190,7 @@ export async function GET(req: NextRequest) {
       domain: company.domain,
       industry: company.industry,
       posts_per_week: company.posts_per_week,
+      ga4_property_id: (company as Record<string, unknown>).ga4_property_id ?? null,
     },
     content: {
       totalPosts: posts.length,
