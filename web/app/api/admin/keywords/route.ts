@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '../../../../lib/supabase'
-import { getKeywordIdeas, selectBestKeyword } from '../../../../lib/dataforseo'
-import Anthropic from '@anthropic-ai/sdk'
+import { getRankedKeywords, getKeywordIdeas } from '../../../../lib/dataforseo'
 
 export const maxDuration = 30
 
 function auth(req: NextRequest) {
   return req.headers.get('x-admin-key') === process.env.ADMIN_KEY
 }
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export async function GET(req: NextRequest) {
   if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -42,58 +39,70 @@ export async function POST(req: NextRequest) {
     .select('keyword')
     .eq('company_id', company_id)
 
-  const covered = existingKeywords?.map(k => k.keyword) ?? []
+  const covered = new Set((existingKeywords ?? []).map(k => k.keyword.toLowerCase()))
+  const locationCode = (company as { location_code?: number }).location_code ?? 2840
 
   try {
-    // Generate seed keywords via Claude
-    const seedRes = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
-      messages: [{
-        role: 'user',
-        content: `Company: ${company.name}
-Industry: ${company.industry}
-Existing target keywords: ${company.target_keywords?.join(', ') || 'none'}
-Already tracked keywords: ${covered.slice(0, 20).join(', ') || 'none'}
+    // Phase 1: import keywords the domain already ranks for (most accurate source)
+    const ranked = await getRankedKeywords(company.domain, locationCode, 100)
+    const freshRanked = ranked.filter(k => !covered.has(k.keyword.toLowerCase()))
 
-Generate 10 specific long-tail keyword phrases this company could realistically rank for.
-Mix informational and commercial intent. Be specific, not generic.
-Return ONLY a JSON array: ["keyword 1", "keyword 2", ...]`,
-      }],
-    })
-    const seedText = seedRes.content[0].type === 'text' ? seedRes.content[0].text : '[]'
-    const seedMatch = seedText.match(/\[[\s\S]*\]/)
-    const seeds: string[] = JSON.parse(seedMatch?.[0] ?? '[]')
-
-    const locationCode = (company as { location_code?: number }).location_code ?? 2840
-
-    // Get keyword ideas + difficulty from DataForSEO
-    const ideas = await getKeywordIdeas(seeds.slice(0, 5), locationCode, 50)
-
-    // Filter out already tracked keywords
-    const fresh = ideas.filter(k => !covered.includes(k.keyword))
-
-    // Save to keywords table
-    if (fresh.length > 0) {
+    if (freshRanked.length > 0) {
       await supabase.from('keywords').upsert(
-        fresh.map(k => ({
+        freshRanked.map(k => ({
           company_id,
           keyword: k.keyword,
           search_volume: k.searchVolume,
           difficulty: k.difficulty,
+          current_rank: k.rank,
           status: 'tracking',
         })),
         { onConflict: 'company_id,keyword' }
       )
+      // Write rank history for each
+      await supabase.from('keyword_rank_history').insert(
+        freshRanked.map(k => {
+          const existing = existingKeywords?.find(e => e.keyword.toLowerCase() === k.keyword.toLowerCase())
+          return {
+            keyword_id: (existing as { id?: string } | undefined)?.id,
+            company_id,
+            rank: k.rank,
+            checked_at: new Date().toISOString(),
+          }
+        }).filter(r => r.keyword_id)
+      ).throwOnError().catch(() => { /* rank history is best-effort */ })
     }
 
-    // Also return best opportunity
-    const best = selectBestKeyword(fresh, covered)
+    // Phase 2: if we got fewer than 20 ranked keywords, supplement with ideas based on target keywords
+    let ideaCount = 0
+    if (freshRanked.length < 20 && company.target_keywords?.length) {
+      const seeds = company.target_keywords.slice(0, 5)
+      const ideas = await getKeywordIdeas(seeds, locationCode, 50)
+      const freshIdeas = ideas.filter(k => !covered.has(k.keyword.toLowerCase()) && !freshRanked.some(r => r.keyword.toLowerCase() === k.keyword.toLowerCase()))
+      if (freshIdeas.length > 0) {
+        await supabase.from('keywords').upsert(
+          freshIdeas.map(k => ({
+            company_id,
+            keyword: k.keyword,
+            search_volume: k.searchVolume,
+            difficulty: k.difficulty,
+            status: 'tracking',
+          })),
+          { onConflict: 'company_id,keyword' }
+        )
+        ideaCount = freshIdeas.length
+      }
+    }
+
+    const total = freshRanked.length + ideaCount
+    const parts = []
+    if (freshRanked.length > 0) parts.push(`${freshRanked.length} keywords your site already ranks for (with live positions)`)
+    if (ideaCount > 0) parts.push(`${ideaCount} additional keyword opportunities`)
+    if (total === 0) parts.push('No new keywords found — all are already tracked')
 
     return NextResponse.json({
-      found: fresh.length,
-      best: best ?? null,
-      message: `Found ${fresh.length} new keyword opportunities.`,
+      found: total,
+      message: parts.join(' + ') + '.',
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'

@@ -91,6 +91,60 @@ export async function getKeywordIdeas(
   }))
 }
 
+export type RankedKeyword = {
+  keyword: string
+  searchVolume: number
+  difficulty: number
+  rank: number
+  url: string
+}
+
+/**
+ * Fetch all keywords a domain already ranks for in Google (top 100).
+ * This is the most reliable way to seed keyword tracking.
+ * Cost: ~$0.002 per request
+ */
+export async function getRankedKeywords(
+  domain: string,
+  locationCode = 2840,
+  limit = 100
+): Promise<RankedKeyword[]> {
+  const res = await fetch(`${BASE}/dataforseo_labs/google/ranked_keywords/live`, {
+    method: 'POST',
+    headers: { Authorization: getAuth(), 'Content-Type': 'application/json' },
+    body: JSON.stringify([{
+      target: domain,
+      location_code: locationCode,
+      language_code: 'en',
+      limit,
+      order_by: ['ranked_serp_element.serp_item.rank_absolute,asc'],
+      filters: ['ranked_serp_element.serp_item.rank_absolute', 'in', [1, 100]],
+    }]),
+  })
+  const data = await res.json()
+  if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
+    throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
+  }
+  const items: Array<{
+    keyword_data: {
+      keyword: string
+      keyword_info: { search_volume: number }
+      keyword_properties: { keyword_difficulty: number }
+    }
+    ranked_serp_element: {
+      serp_item: { rank_absolute: number; url: string }
+    }
+  }> = data.tasks?.[0]?.result?.[0]?.items ?? []
+
+  return items.map(item => ({
+    keyword: item.keyword_data.keyword,
+    searchVolume: item.keyword_data.keyword_info?.search_volume ?? 0,
+    difficulty: item.keyword_data.keyword_properties?.keyword_difficulty ?? 0,
+    rank: item.ranked_serp_element.serp_item.rank_absolute,
+    url: item.ranked_serp_element.serp_item.url ?? '',
+  }))
+}
+
 export type SerpIntent = {
   format: 'listicle' | 'guide' | 'comparison' | 'product' | 'mixed'
   topResults: Array<{ title: string; url: string; type: string }>
