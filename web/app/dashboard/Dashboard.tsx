@@ -304,7 +304,8 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                       headers: { ...headers, 'Content-Type': 'application/json' },
                       body: JSON.stringify({ id: cid, ga4_property_id: propertyId }),
                     })
-                    fetchData()
+                    await fetchData()
+                    setAnalyticsKey(k => k + 1)
                   }}
                 />
               ) : (
