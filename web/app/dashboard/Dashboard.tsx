@@ -34,6 +34,16 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
   const [researchResult, setResearchResult] = useState<Record<string, string>>({})
   const [checkingRankings, setCheckingRankings] = useState<string | null>(null)
   const [rankingResult, setRankingResult] = useState<Record<string, string>>({})
+  const [competitorInput, setCompetitorInput] = useState<Record<string, string>>({})
+  const [analyzingCompetitor, setAnalyzingCompetitor] = useState<string | null>(null)
+  const [competitorResult, setCompetitorResult] = useState<Record<string, string>>({})
+  const [schedule, setSchedule] = useState<Array<{
+    company_id: string; company_name: string; posts_per_week: number
+    days_since_last_post: number | null; days_until_due: number; is_due: boolean
+    draft_count: number; last_post_date: string | null
+  }>>([])
+  const [runningSchedule, setRunningSchedule] = useState(false)
+  const [scheduleResult, setScheduleResult] = useState('')
 
   const headers = { 'x-admin-key': adminKey }
 
@@ -55,6 +65,8 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
     setPosts(postsData.posts ?? [])
     setCitations(citationsData.citations ?? [])
     setKeywords(keywordsData.keywords ?? [])
+    const scheduleData = await fetch('/api/admin/schedule', { headers }).then(r => r.json())
+    setSchedule(scheduleData.schedule ?? [])
     setLoading(false)
   }, [adminKey])
 
@@ -104,6 +116,22 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
     const data = await res.json()
     setRankingResult(prev => ({ ...prev, [companyId]: data.message ?? data.error ?? 'Done' }))
     setCheckingRankings(null)
+    if (res.ok) fetchData()
+  }
+
+  async function analyzeCompetitor(companyId: string) {
+    const domain = competitorInput[companyId]?.trim()
+    if (!domain) return
+    setAnalyzingCompetitor(companyId)
+    setCompetitorResult(prev => ({ ...prev, [companyId]: '' }))
+    const res = await fetch('/api/admin/competitors', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company_id: companyId, competitor_domain: domain }),
+    })
+    const data = await res.json()
+    setCompetitorResult(prev => ({ ...prev, [companyId]: data.message ?? data.error ?? 'Done' }))
+    setAnalyzingCompetitor(null)
     if (res.ok) fetchData()
   }
 
@@ -379,6 +407,29 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                     {rankingResult[company.id] && (
                       <p className="text-xs text-zinc-400 mt-2">{rankingResult[company.id]}</p>
                     )}
+                    {/* Competitor gap analysis */}
+                    <div className="mt-3 pt-3 border-t border-zinc-800">
+                      <p className="text-xs text-zinc-600 mb-2">Competitor gap analysis</p>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={competitorInput[company.id] ?? ''}
+                          onChange={e => setCompetitorInput(prev => ({ ...prev, [company.id]: e.target.value }))}
+                          placeholder="competitor.com"
+                          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                        />
+                        <button
+                          onClick={() => analyzeCompetitor(company.id)}
+                          disabled={analyzingCompetitor === company.id || !competitorInput[company.id]?.trim()}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                        >
+                          {analyzingCompetitor === company.id ? 'Analyzing...' : '🎯 Find Gaps'}
+                        </button>
+                      </div>
+                      {competitorResult[company.id] && (
+                        <p className="text-xs text-zinc-400 mt-2">{competitorResult[company.id]}</p>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -458,6 +509,54 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
           {/* AGENTS TAB */}
           {tab === 'agents' && (
             <div className="grid gap-4">
+              {/* Schedule status */}
+              <div className="rounded-xl border border-zinc-800 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-semibold">Content Schedule</h3>
+                    <p className="text-sm text-zinc-400 mt-0.5">Auto-write posts based on each company's cadence</p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      setRunningSchedule(true)
+                      setScheduleResult('')
+                      const res = await fetch('/api/admin/schedule', {
+                        method: 'POST',
+                        headers: { ...headers, 'Content-Type': 'application/json' },
+                      })
+                      const data = await res.json()
+                      setScheduleResult(data.message ?? data.error ?? 'Done')
+                      setRunningSchedule(false)
+                      fetchData()
+                    }}
+                    disabled={runningSchedule}
+                    className="text-xs px-4 py-2 rounded-lg bg-white text-black font-semibold hover:bg-zinc-200 disabled:opacity-50 transition-colors"
+                  >
+                    {runningSchedule ? 'Running...' : 'Run Schedule'}
+                  </button>
+                </div>
+                {scheduleResult && (
+                  <p className="text-xs text-zinc-400 mb-3 bg-zinc-900 px-3 py-2 rounded-lg">{scheduleResult}</p>
+                )}
+                <div className="grid gap-2">
+                  {schedule.map(s => (
+                    <div key={s.company_id} className="flex items-center justify-between text-sm">
+                      <span className="text-zinc-300">{s.company_name}</span>
+                      <div className="flex items-center gap-3 text-xs">
+                        {s.draft_count > 0 && (
+                          <span className="text-zinc-500">{s.draft_count} draft{s.draft_count !== 1 ? 's' : ''}</span>
+                        )}
+                        <span className="text-zinc-500">{s.posts_per_week}x/week</span>
+                        {s.is_due ? (
+                          <span className="text-orange-400 font-medium">● Due now</span>
+                        ) : (
+                          <span className="text-zinc-600">Due in {s.days_until_due}d</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
               {[
                 {
                   id: 'writer',

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '../../../../../lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
-import { getKeywordIdeas, getSearchVolumes, selectBestKeyword, analyzeSerpIntent, type SerpIntent } from '../../../../../lib/dataforseo'
+import { getKeywordIdeas, getSearchVolumes, selectBestKeyword, analyzeSerpIntent, classifyIntent, type SerpIntent } from '../../../../../lib/dataforseo'
 
 export const maxDuration = 60
 
@@ -118,10 +118,12 @@ Return ONLY a JSON array of strings: ["keyword 1", "keyword 2", ...]`,
           // Non-fatal — proceed without SERP data
         }
 
+        const intent = classifyIntent(best.keyword)
         keywordContext = `\n## Keyword research data (DataForSEO)
 Selected primary keyword: "${best.keyword}"
 Search volume: ${best.searchVolume.toLocaleString()}/month
 Keyword difficulty: ${best.difficulty}/100
+Search intent: ${intent} — ${intent === 'transactional' ? 'reader is ready to act/buy, include strong CTA and pricing/booking info' : intent === 'commercial' ? 'reader is comparing options, include comparisons and clear differentiators' : 'reader wants to learn, be thorough and educational'}
 ${serpIntent ? `
 ## SERP intent analysis
 Winning content format for this keyword: ${serpIntent.format}
@@ -423,12 +425,102 @@ export async function POST(req: NextRequest) {
   }
 }
 
+function buildArticleSchema(post: {
+  title: string
+  meta_description: string | null
+  created_at?: string
+  published_at?: string | null
+}, company: { name: string; domain: string; wp_url: string }) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: post.title,
+    description: post.meta_description ?? '',
+    datePublished: post.published_at ?? post.created_at ?? new Date().toISOString(),
+    dateModified: new Date().toISOString(),
+    author: { '@type': 'Organization', name: company.name, url: company.wp_url },
+    publisher: {
+      '@type': 'Organization',
+      name: company.name,
+      url: company.wp_url,
+      logo: { '@type': 'ImageObject', url: `${company.wp_url}/wp-content/uploads/logo.png` },
+    },
+    mainEntityOfPage: { '@type': 'WebPage', '@id': company.wp_url },
+  }
+}
+
+function buildLocalBusinessSchema(company: {
+  name: string
+  domain: string
+  wp_url: string
+  industry: string
+}) {
+  const localConfigs: Record<string, object> = {
+    'experiencealoha.co': {
+      '@context': 'https://schema.org',
+      '@type': 'LocalBusiness',
+      name: company.name,
+      url: company.wp_url,
+      description: 'Luxury experiential events and destination proposal planning in Hawaii.',
+      address: { '@type': 'PostalAddress', addressLocality: 'Honolulu', addressRegion: 'HI', addressCountry: 'US' },
+      areaServed: { '@type': 'State', name: 'Hawaii' },
+      priceRange: '$$$',
+    },
+    'lowtidesailing.com': {
+      '@context': 'https://schema.org',
+      '@type': 'EducationalOrganization',
+      name: company.name,
+      url: company.wp_url,
+      description: 'IYT-certified sailing school offering courses in the Caribbean and Mediterranean.',
+      telephone: '+1-301-525-5106',
+      email: 'dan@lowtidesailing.com',
+      address: { '@type': 'PostalAddress', addressLocality: 'Brooklyn', addressRegion: 'NY', addressCountry: 'US' },
+      areaServed: { '@type': 'Country', name: 'United States' },
+      hasCredential: 'IYT International Yacht Training Certification',
+    },
+  }
+  return localConfigs[company.domain] ?? null
+}
+
+function buildHowToSchema(title: string, content: string) {
+  if (!/\bhow to\b/i.test(title)) return null
+
+  // Extract steps from <h3> or <li> tags in the content
+  const stepMatches = content.match(/<(?:h3|li)[^>]*>(.*?)<\/(?:h3|li)>/gi) ?? []
+  const steps = stepMatches
+    .slice(0, 10)
+    .map((s, i) => ({
+      '@type': 'HowToStep',
+      position: i + 1,
+      name: s.replace(/<[^>]+>/g, '').trim(),
+    }))
+    .filter(s => s.name.length > 3)
+
+  if (steps.length < 3) return null
+
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'HowTo',
+    name: title,
+    step: steps,
+  }
+}
+
+function injectSchemas(content: string, schemas: object[]): string {
+  const scriptTags = schemas
+    .map(s => `<script type="application/ld+json">\n${JSON.stringify(s, null, 2)}\n</script>`)
+    .join('\n')
+  return content + '\n' + scriptTags
+}
+
 async function publishToWordPress(post: {
   id: string
   title: string
   content: string
   meta_description: string | null
-  companies: { wp_url: string; wp_user: string; wp_app_password: string }
+  created_at?: string
+  published_at?: string | null
+  companies: { name: string; wp_url: string; wp_user: string; wp_app_password: string; domain: string; industry: string }
 }) {
   const supabase = getSupabaseAdmin()
   const { wp_url, wp_user, wp_app_password } = post.companies
@@ -447,9 +539,18 @@ async function publishToWordPress(post: {
   // SEO title: prefer stored seo_title field if available, otherwise trim H1 to 60 chars
   const seoTitle = post.title.length <= 60 ? post.title : post.title.slice(0, 57) + '...'
 
+  // Build and inject structured data schemas
+  const schemas: object[] = []
+  schemas.push(buildArticleSchema(post, post.companies))
+  const localSchema = buildLocalBusinessSchema(post.companies)
+  if (localSchema) schemas.push(localSchema)
+  const howToSchema = buildHowToSchema(post.title, post.content)
+  if (howToSchema) schemas.push(howToSchema)
+  const contentWithSchemas = injectSchemas(post.content, schemas)
+
   const body = JSON.stringify({
     title: post.title,
-    content: post.content,
+    content: contentWithSchemas,
     status: 'publish',
     slug,
     excerpt: post.meta_description ?? '',

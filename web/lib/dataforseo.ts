@@ -156,9 +156,42 @@ export async function analyzeSerpIntent(
   }
 }
 
+export type SearchIntent = 'informational' | 'commercial' | 'transactional' | 'navigational'
+
 /**
- * Pick the best keyword from a list based on volume and difficulty.
- * Scores keywords by volume/difficulty ratio, filtered by min volume and max difficulty.
+ * Classify keyword search intent from the keyword text.
+ * Transactional/commercial keywords are prioritized for revenue-focused businesses.
+ */
+export function classifyIntent(keyword: string): SearchIntent {
+  const kw = keyword.toLowerCase()
+
+  // Navigational — brand/site lookups
+  if (/\b(login|sign in|website|official|contact|near me)\b/.test(kw)) return 'navigational'
+
+  // Transactional — ready to buy
+  if (/\b(buy|book|hire|rent|charter|enroll|sign up|register|get|purchase|order|schedule|reserve|pricing|cost|price|fee|quote)\b/.test(kw)) return 'transactional'
+
+  // Commercial investigation — comparing before buying
+  if (/\b(best|top|vs|versus|compare|review|reviews|worth it|alternative|alternatives|recommend|cheapest|affordable)\b/.test(kw)) return 'commercial'
+
+  // Default to informational
+  return 'informational'
+}
+
+/**
+ * Intent multipliers — how much to boost a keyword's score based on intent.
+ * Adjust per business type: luxury/service businesses want transactional/commercial traffic.
+ */
+const INTENT_MULTIPLIERS: Record<SearchIntent, number> = {
+  transactional: 2.5,
+  commercial: 2.0,
+  informational: 1.0,
+  navigational: 0.3,
+}
+
+/**
+ * Pick the best keyword from a list based on volume, difficulty, and search intent.
+ * Scores keywords by (volume / (difficulty + 1)) × intent multiplier.
  */
 export function selectBestKeyword(
   keywords: KeywordIdea[],
@@ -174,9 +207,10 @@ export function selectBestKeyword(
       !existing.has(k.keyword.toLowerCase())
     )
     .sort((a, b) => {
-      // Score = volume / (difficulty + 1) — rewards high volume, low difficulty
-      const scoreA = a.searchVolume / (a.difficulty + 1)
-      const scoreB = b.searchVolume / (b.difficulty + 1)
+      const intentA = classifyIntent(a.keyword)
+      const intentB = classifyIntent(b.keyword)
+      const scoreA = (a.searchVolume / (a.difficulty + 1)) * INTENT_MULTIPLIERS[intentA]
+      const scoreB = (b.searchVolume / (b.difficulty + 1)) * INTENT_MULTIPLIERS[intentB]
       return scoreB - scoreA
     })
   return candidates[0] ?? null
