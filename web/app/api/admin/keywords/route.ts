@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
         return existing ? { keyword_id: existing.id, company_id, rank: k.rank, checked_at: new Date().toISOString() } : null
       }).filter(Boolean)
       if (rankHistoryRows.length > 0) {
-        await supabase.from('keyword_rank_history').insert(rankHistoryRows).then(() => {}).catch(() => {})
+        try { await supabase.from('keyword_rank_history').insert(rankHistoryRows) } catch { /* best-effort */ }
       }
     }
 
