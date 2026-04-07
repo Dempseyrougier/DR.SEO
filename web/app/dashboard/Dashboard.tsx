@@ -75,6 +75,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
     setPosts(postsData.posts ?? [])
     setCitations(citationsData.citations ?? [])
     setKeywords(keywordsData.keywords ?? [])
+    if (keywordsData.error) console.error('Keywords fetch error:', keywordsData.error)
     setSchedule(scheduleData.schedule ?? [])
     setLoading(false)
   }, [adminKey])

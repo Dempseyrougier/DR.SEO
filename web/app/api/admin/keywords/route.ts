@@ -15,8 +15,8 @@ export async function GET(req: NextRequest) {
   if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const companyId = req.nextUrl.searchParams.get('company_id')
   const supabase = getSupabaseAdmin()
-  const query = supabase.from('keywords').select('*').order('search_volume', { ascending: false })
-  if (companyId) query.eq('company_id', companyId)
+  let query = supabase.from('keywords').select('*').order('search_volume', { ascending: false })
+  if (companyId) query = query.eq('company_id', companyId)
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ keywords: data ?? [] })
@@ -134,6 +134,10 @@ export async function POST(req: NextRequest) {
         }))
       )
       if (insertError) return NextResponse.json({ error: `Failed to save keywords: ${insertError.message}` }, { status: 500 })
+
+      // Verify actual DB count
+      const { count } = await supabase.from('keywords').select('*', { count: 'exact', head: true }).eq('company_id', company_id)
+      if (!count || count === 0) return NextResponse.json({ error: 'Keywords were processed but none were saved to the database. Check that the keywords table has all required columns (id, company_id, keyword, search_volume, difficulty, current_rank, status).' }, { status: 500 })
 
       // Write initial rank history snapshot
       const rankHistoryRows = relevant.map(k => {
