@@ -13,6 +13,8 @@ export type Company = {
   wp_url: string | null
   wp_user: string | null
   wp_app_password: string | null
+  location_code: number
+  money_page_url: string | null
   active: boolean
   created_at: string
 }

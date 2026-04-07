@@ -2,17 +2,36 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import type { Company, Post, CitationLog } from '../../lib/types'
+import PostEditor from './PostEditor'
 
-type Tab = 'companies' | 'posts' | 'agents' | 'citations'
+type Tab = 'companies' | 'posts' | 'keywords' | 'agents' | 'citations'
+
+type Keyword = {
+  id: string
+  company_id: string
+  keyword: string
+  search_volume: number | null
+  difficulty: number | null
+  current_rank: number | null
+  status: string
+  created_at: string
+}
 
 export default function Dashboard({ adminKey }: { adminKey: string }) {
   const [tab, setTab] = useState<Tab>('companies')
   const [companies, setCompanies] = useState<Company[]>([])
   const [posts, setPosts] = useState<Post[]>([])
   const [citations, setCitations] = useState<CitationLog[]>([])
+  const [keywords, setKeywords] = useState<Keyword[]>([])
   const [loading, setLoading] = useState(true)
   const [agentRunning, setAgentRunning] = useState<string | null>(null)
   const [agentResult, setAgentResult] = useState<Record<string, string>>({})
+  const [writerExpanded, setWriterExpanded] = useState<Record<string, boolean>>({})
+  const [writerPrompt, setWriterPrompt] = useState<Record<string, string>>({})
+  const [writerUrl, setWriterUrl] = useState<Record<string, string>>({})
+  const [editingPost, setEditingPost] = useState<Post | null>(null)
+  const [researchingKeywords, setResearchingKeywords] = useState<string | null>(null)
+  const [researchResult, setResearchResult] = useState<Record<string, string>>({})
 
   const headers = { 'x-admin-key': adminKey }
 
@@ -23,27 +42,30 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
       fetch('/api/admin/posts', { headers }),
       fetch('/api/admin/citations', { headers }),
     ])
-    const [companiesData, postsData, citationsData] = await Promise.all([
+
+    const [companiesData, postsData, citationsData, keywordsData] = await Promise.all([
       companiesRes.json(),
       postsRes.json(),
       citationsRes.json(),
+      fetch('/api/admin/keywords', { headers }).then(r => r.json()),
     ])
     setCompanies(companiesData.companies ?? [])
     setPosts(postsData.posts ?? [])
     setCitations(citationsData.citations ?? [])
+    setKeywords(keywordsData.keywords ?? [])
     setLoading(false)
   }, [adminKey])
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  async function runAgent(agent: string, companyId?: string) {
+  async function runAgent(agent: string, companyId?: string, extra?: { prompt?: string; url?: string }) {
     const key = companyId ? `${agent}:${companyId}` : agent
     setAgentRunning(key)
     setAgentResult(prev => ({ ...prev, [key]: '' }))
     const res = await fetch('/api/admin/agents/run', {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent, company_id: companyId }),
+      body: JSON.stringify({ agent, company_id: companyId, ...extra }),
     })
     const data = await res.json()
     setAgentResult(prev => ({ ...prev, [key]: data.message ?? data.error ?? 'Done' }))
@@ -69,15 +91,38 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
     fetchData()
   }
 
+  async function researchKeywords(companyId: string) {
+    setResearchingKeywords(companyId)
+    setResearchResult(prev => ({ ...prev, [companyId]: '' }))
+    const res = await fetch('/api/admin/keywords', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company_id: companyId }),
+    })
+    const data = await res.json()
+    setResearchResult(prev => ({ ...prev, [companyId]: data.message ?? data.error ?? 'Done' }))
+    setResearchingKeywords(null)
+    if (res.ok) fetchData()
+  }
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'companies', label: 'Companies' },
     { id: 'posts', label: `Posts${posts.length ? ` (${posts.length})` : ''}` },
+    { id: 'keywords', label: `Keywords${keywords.length ? ` (${keywords.length})` : ''}` },
     { id: 'agents', label: 'Agents' },
     { id: 'citations', label: 'Citations' },
   ]
 
   return (
     <div className="min-h-screen p-6 max-w-6xl mx-auto">
+      {editingPost && (
+        <PostEditor
+          post={editingPost}
+          adminKey={adminKey}
+          onClose={() => setEditingPost(null)}
+          onSave={() => { fetchData(); setEditingPost(null) }}
+        />
+      )}
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -158,28 +203,61 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                       {company.voice_guidelines}
                     </p>
                   )}
-                  <div className="flex gap-2 mt-4">
-                    <button
-                      onClick={() => runAgent('writer', company.id)}
-                      disabled={agentRunning === `writer:${company.id}`}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                    >
-                      {agentRunning === `writer:${company.id}` ? 'Writing...' : 'Write Post'}
-                    </button>
-                    <button
-                      onClick={() => runAgent('citation', company.id)}
-                      disabled={agentRunning === `citation:${company.id}`}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                    >
-                      {agentRunning === `citation:${company.id}` ? 'Checking...' : 'Check Citations'}
-                    </button>
+                  <div className="mt-4 border-t border-zinc-800 pt-4">
+                    {/* Writer controls */}
+                    <div className="mb-3">
+                      <button
+                        onClick={() => setWriterExpanded(prev => ({ ...prev, [company.id]: !prev[company.id] }))}
+                        className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition-colors"
+                      >
+                        <span>{writerExpanded[company.id] ? '▾' : '▸'}</span>
+                        Writer options
+                      </button>
+                      {writerExpanded[company.id] && (
+                        <div className="mt-2 flex flex-col gap-2">
+                          <textarea
+                            value={writerPrompt[company.id] ?? ''}
+                            onChange={e => setWriterPrompt(prev => ({ ...prev, [company.id]: e.target.value }))}
+                            placeholder="Topic or prompt (optional) — e.g. 'write about sunset sailing charters for bachelorette parties'"
+                            rows={2}
+                            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
+                          />
+                          <input
+                            type="url"
+                            value={writerUrl[company.id] ?? ''}
+                            onChange={e => setWriterUrl(prev => ({ ...prev, [company.id]: e.target.value }))}
+                            placeholder="Reference URL (optional) — Claude will read this page for inspiration"
+                            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => runAgent('writer', company.id, {
+                          prompt: writerPrompt[company.id] || undefined,
+                          url: writerUrl[company.id] || undefined,
+                        })}
+                        disabled={agentRunning === `writer:${company.id}`}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                      >
+                        {agentRunning === `writer:${company.id}` ? 'Writing...' : 'Write Post'}
+                      </button>
+                      <button
+                        onClick={() => runAgent('citation', company.id)}
+                        disabled={agentRunning === `citation:${company.id}`}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                      >
+                        {agentRunning === `citation:${company.id}` ? 'Checking...' : 'Check Citations'}
+                      </button>
+                    </div>
+                    {agentResult[`writer:${company.id}`] && (
+                      <p className="text-xs text-zinc-400 mt-2">{agentResult[`writer:${company.id}`]}</p>
+                    )}
+                    {agentResult[`citation:${company.id}`] && (
+                      <p className="text-xs text-zinc-400 mt-2">{agentResult[`citation:${company.id}`]}</p>
+                    )}
                   </div>
-                  {agentResult[`writer:${company.id}`] && (
-                    <p className="text-xs text-zinc-400 mt-2">{agentResult[`writer:${company.id}`]}</p>
-                  )}
-                  {agentResult[`citation:${company.id}`] && (
-                    <p className="text-xs text-zinc-400 mt-2">{agentResult[`citation:${company.id}`]}</p>
-                  )}
                 </div>
               ))}
             </div>
@@ -225,6 +303,12 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                       </p>
                     </div>
                     <div className="flex flex-col gap-1.5 shrink-0">
+                      <button
+                        onClick={() => setEditingPost(post)}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+                      >
+                        Edit
+                      </button>
                       {post.status === 'draft' && (
                         <button
                           onClick={() => updatePostStatus(post.id, 'approved')}
@@ -246,6 +330,89 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* KEYWORDS TAB */}
+          {tab === 'keywords' && (
+            <div>
+              {/* Research buttons per company */}
+              <div className="flex gap-2 mb-6 flex-wrap">
+                {companies.map(company => (
+                  <div key={company.id} className="flex flex-col gap-1">
+                    <button
+                      onClick={() => researchKeywords(company.id)}
+                      disabled={researchingKeywords === company.id}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                    >
+                      {researchingKeywords === company.id ? 'Researching...' : `Research ${company.name}`}
+                    </button>
+                    {researchResult[company.id] && (
+                      <span className="text-xs text-zinc-500">{researchResult[company.id]}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {keywords.length === 0 ? (
+                <p className="text-zinc-500 text-sm">No keywords yet. Click a Research button above to find opportunities.</p>
+              ) : (
+                <div className="rounded-xl border border-zinc-800 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-800 text-xs text-zinc-500">
+                        <th className="text-left px-4 py-3 font-medium">Keyword</th>
+                        <th className="text-left px-4 py-3 font-medium">Company</th>
+                        <th className="text-right px-4 py-3 font-medium">Volume</th>
+                        <th className="text-right px-4 py-3 font-medium">Difficulty</th>
+                        <th className="text-left px-4 py-3 font-medium">Status</th>
+                        <th className="px-4 py-3" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {keywords.map((kw, i) => {
+                        const company = companies.find(c => c.id === kw.company_id)
+                        const diff = kw.difficulty ?? 0
+                        const diffColor = diff < 30 ? 'text-green-400' : diff < 60 ? 'text-yellow-400' : 'text-red-400'
+                        return (
+                          <tr key={kw.id} className={`border-b border-zinc-800/50 hover:bg-zinc-900/50 ${i % 2 === 0 ? '' : 'bg-zinc-900/20'}`}>
+                            <td className="px-4 py-3 font-medium text-zinc-200">{kw.keyword}</td>
+                            <td className="px-4 py-3 text-xs text-zinc-500">{company?.name ?? '—'}</td>
+                            <td className="px-4 py-3 text-right text-zinc-300">
+                              {kw.search_volume != null ? kw.search_volume.toLocaleString() : '—'}
+                            </td>
+                            <td className={`px-4 py-3 text-right font-medium ${diffColor}`}>
+                              {kw.difficulty != null ? `${kw.difficulty}/100` : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                kw.status === 'published' ? 'bg-green-900/40 text-green-400' :
+                                kw.status === 'content_planned' ? 'bg-blue-900/40 text-blue-400' :
+                                'bg-zinc-800 text-zinc-500'
+                              }`}>
+                                {kw.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              {kw.status === 'tracking' && (
+                                <button
+                                  onClick={() => {
+                                    setWriterPrompt(prev => ({ ...prev, [kw.company_id]: `write about "${kw.keyword}"` }))
+                                    setTab('companies')
+                                  }}
+                                  className="text-xs px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+                                >
+                                  Write Post
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
