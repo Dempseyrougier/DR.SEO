@@ -10,19 +10,14 @@ export default function Home() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (input === process.env.NEXT_PUBLIC_ADMIN_KEY) {
-      setKey(input)
-    } else {
-      // Validate via API so we don't expose the key client-side
-      fetch('/api/admin/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: input }),
-      }).then(r => {
-        if (r.ok) setKey(input)
-        else setError('Invalid key')
-      })
-    }
+    fetch('/api/admin/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: input }),
+    }).then(r => {
+      if (r.ok) setKey(input)
+      else setError('Invalid key')
+    })
   }
 
   if (!key) {
@@ -54,5 +49,5 @@ export default function Home() {
     )
   }
 
-  return <Dashboard adminKey={key} />
+  return <Dashboard adminKey={key} onLogout={() => setKey('')} />
 }

@@ -17,7 +17,7 @@ type Keyword = {
   created_at: string
 }
 
-export default function Dashboard({ adminKey }: { adminKey: string }) {
+export default function Dashboard({ adminKey, onLogout }: { adminKey: string; onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>('companies')
   const [companies, setCompanies] = useState<Company[]>([])
   const [posts, setPosts] = useState<Post[]>([])
@@ -203,12 +203,20 @@ export default function Dashboard({ adminKey }: { adminKey: string }) {
           <h1 className="text-2xl font-semibold tracking-tight">DR.SEO</h1>
           <p className="text-sm text-zinc-500 mt-0.5">AI-powered SEO platform</p>
         </div>
-        <button
-          onClick={fetchData}
-          className="text-xs text-zinc-500 hover:text-zinc-300 px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-700 transition-colors"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchData}
+            className="text-xs text-zinc-500 hover:text-zinc-300 px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-700 transition-colors"
+          >
+            Refresh
+          </button>
+          <button
+            onClick={onLogout}
+            className="text-xs text-zinc-500 hover:text-zinc-300 px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-700 transition-colors"
+          >
+            Log out
+          </button>
+        </div>
       </div>
 
       {/* Stats bar */}

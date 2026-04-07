@@ -142,6 +142,13 @@ ${serpIntent.topResults.slice(0, 5).map((r, i) => `${i + 1}. "${r.title}"`).join
   let referenceContent = ''
   if (referenceUrl) {
     try {
+      // Block SSRF: only allow public http/https URLs
+      const parsed = new URL(referenceUrl)
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Invalid protocol')
+      const host = parsed.hostname.toLowerCase()
+      const privateIp = /^(localhost|.*\.local|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0)$/.test(host)
+      if (privateIp) throw new Error('Private URL blocked')
+
       const res = await fetch(referenceUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DR.SEO/1.0)' },
         signal: AbortSignal.timeout(8000),
