@@ -107,7 +107,7 @@ export type RankedKeyword = {
 export async function getRankedKeywords(
   domain: string,
   locationCode = 2840,
-  limit = 100
+  limit = 200
 ): Promise<RankedKeyword[]> {
   const res = await fetch(`${BASE}/dataforseo_labs/google/ranked_keywords/live`, {
     method: 'POST',
@@ -118,7 +118,11 @@ export async function getRankedKeywords(
       language_code: 'en',
       limit,
       order_by: ['ranked_serp_element.serp_item.rank_absolute,asc'],
-      filters: ['ranked_serp_element.serp_item.rank_absolute', 'in', [1, 100]],
+      filters: [
+        ['ranked_serp_element.serp_item.rank_absolute', '<=', 100],
+        'and',
+        ['keyword_data.keyword_info.search_volume', '>', 10],
+      ],
     }]),
   })
   const data = await res.json()

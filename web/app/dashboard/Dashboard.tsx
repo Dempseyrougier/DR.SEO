@@ -33,6 +33,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
   const [editingPost, setEditingPost] = useState<Post | null>(null)
   const [researchingKeywords, setResearchingKeywords] = useState<string | null>(null)
   const [researchResult, setResearchResult] = useState<Record<string, string>>({})
+  const [clearingKeywords, setClearingKeywords] = useState<string | null>(null)
   const [checkingRankings, setCheckingRankings] = useState<string | null>(null)
   const [rankingResult, setRankingResult] = useState<Record<string, string>>({})
   const [competitorInput, setCompetitorInput] = useState<Record<string, string>>({})
@@ -152,6 +153,14 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
     setCompetitorResult(prev => ({ ...prev, [companyId]: data.message ?? data.error ?? 'Done' }))
     setAnalyzingCompetitor(null)
     if (res.ok) fetchData()
+  }
+
+  async function clearKeywords(companyId: string, companyName: string) {
+    if (!confirm(`Delete all keywords for ${companyName}? This cannot be undone.`)) return
+    setClearingKeywords(companyId)
+    await fetch(`/api/admin/keywords?company_id=${companyId}`, { method: 'DELETE', headers })
+    setClearingKeywords(null)
+    fetchData()
   }
 
   async function researchKeywords(companyId: string) {
@@ -579,6 +588,13 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                         className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
                       >
                         {checkingRankings === company.id ? 'Checking...' : '📈 Check Rankings'}
+                      </button>
+                      <button
+                        onClick={() => clearKeywords(company.id, company.name)}
+                        disabled={clearingKeywords === company.id}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-red-900 text-zinc-600 hover:text-red-500 disabled:opacity-50 transition-colors"
+                      >
+                        {clearingKeywords === company.id ? 'Clearing...' : 'Clear All'}
                       </button>
                     </div>
                     {researchResult[company.id] && (
