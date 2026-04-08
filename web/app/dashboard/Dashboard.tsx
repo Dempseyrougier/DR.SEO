@@ -584,13 +584,6 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                         {researchingKeywords === company.id ? 'Researching...' : '🔍 Research Keywords'}
                       </button>
                       <button
-                        onClick={() => checkRankings(company.id)}
-                        disabled={checkingRankings === company.id}
-                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                      >
-                        {checkingRankings === company.id ? 'Checking...' : '📈 Check Rankings'}
-                      </button>
-                      <button
                         onClick={() => clearKeywords(company.id, company.name)}
                         disabled={clearingKeywords === company.id}
                         className="text-xs px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-red-900 text-zinc-600 hover:text-red-500 disabled:opacity-50 transition-colors"
@@ -600,9 +593,6 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                     </div>
                     {researchResult[company.id] && (
                       <p className="text-xs text-zinc-500 mt-2">{researchResult[company.id]}</p>
-                    )}
-                    {rankingResult[company.id] && (
-                      <p className="text-xs text-zinc-400 mt-2">{rankingResult[company.id]}</p>
                     )}
                     {/* Competitor gap analysis */}
                     <div className="mt-3 pt-3 border-t border-zinc-800">
