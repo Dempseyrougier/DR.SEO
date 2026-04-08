@@ -48,6 +48,28 @@ async function runWriter(companyId: string, customPrompt?: string, referenceUrl?
   let serpIntent: SerpIntent | null = null
   let keywordContext = ''
 
+  // Pre-check: if no custom prompt, prefer approved keywords from the DB first
+  let preselectedFromDb: string | null = null
+  if (!customPrompt) {
+    const { data: approvedKws } = await supabase
+      .from('keywords')
+      .select('keyword, search_volume, difficulty')
+      .eq('company_id', companyId)
+      .eq('status', 'approved')
+      .not('keyword', 'in', `(${existingKeywords.map(k => `"${k}"`).join(',') || '""'})`)
+      .order('search_volume', { ascending: false })
+      .limit(1)
+
+    if (approvedKws?.[0]) {
+      preselectedFromDb = approvedKws[0].keyword
+      selectedKeyword = {
+        keyword: approvedKws[0].keyword,
+        searchVolume: approvedKws[0].search_volume ?? 0,
+        difficulty: approvedKws[0].difficulty ?? 0,
+      }
+    }
+  }
+
   try {
     // If user gave a custom prompt, research that topic directly
     // Otherwise generate keyword candidates via Claude first
@@ -91,7 +113,12 @@ Return ONLY a JSON array of strings: ["keyword 1", "keyword 2", ...]`,
       seedKeywords = JSON.parse(seedMatch?.[0] ?? '[]')
     }
 
-    if (seedKeywords.length > 0) {
+    if (preselectedFromDb) {
+      // Already selected from approved keywords — skip DataForSEO seed research
+      try { serpIntent = await analyzeSerpIntent(preselectedFromDb, locationCode) } catch { /* non-fatal */ }
+      const intent = classifyIntent(preselectedFromDb)
+      keywordContext = `\n## Keyword selected from approved list\nPrimary keyword: "${preselectedFromDb}"\nSearch intent: ${intent}`
+    } else if (seedKeywords.length > 0) {
       // Get keyword ideas + difficulty from DataForSEO Labs
       const ideas = await getKeywordIdeas(seedKeywords.slice(0, 4), locationCode)
 

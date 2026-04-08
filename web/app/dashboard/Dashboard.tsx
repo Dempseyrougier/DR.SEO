@@ -34,6 +34,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
   const [researchingKeywords, setResearchingKeywords] = useState<string | null>(null)
   const [researchResult, setResearchResult] = useState<Record<string, string>>({})
   const [clearingKeywords, setClearingKeywords] = useState<string | null>(null)
+  const [kwFilterStatus, setKwFilterStatus] = useState('')
   const [checkingRankings, setCheckingRankings] = useState<string | null>(null)
   const [rankingResult, setRankingResult] = useState<Record<string, string>>({})
   const [competitorInput, setCompetitorInput] = useState<Record<string, string>>({})
@@ -194,9 +195,11 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
   })
 
   // Filtered keywords
-  const filteredKeywords = kwFilterCompany
-    ? keywords.filter(k => k.company_id === kwFilterCompany)
-    : keywords
+  const filteredKeywords = keywords.filter(k => {
+    if (kwFilterCompany && k.company_id !== kwFilterCompany) return false
+    if (kwFilterStatus && k.status !== kwFilterStatus) return false
+    return true
+  })
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'analytics', label: 'Analytics' },
@@ -621,8 +624,8 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                 ))}
               </div>
 
-              {/* Company filter for keyword table */}
-              <div className="flex items-center gap-2 mb-3">
+              {/* Filters for keyword table */}
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
                 <select
                   value={kwFilterCompany}
                   onChange={e => setKwFilterCompany(e.target.value)}
@@ -632,6 +635,17 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                   {companies.map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
+                </select>
+                <select
+                  value={kwFilterStatus}
+                  onChange={e => setKwFilterStatus(e.target.value)}
+                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500"
+                >
+                  <option value="">All statuses</option>
+                  <option value="tracking">Tracking</option>
+                  <option value="approved">Approved</option>
+                  <option value="content_planned">Content planned</option>
+                  <option value="published">Published</option>
                 </select>
                 <span className="text-xs text-zinc-600 ml-auto">{filteredKeywords.length} keywords</span>
               </div>
@@ -680,21 +694,57 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                               <span className={`text-xs px-2 py-0.5 rounded-full ${
                                 kw.status === 'published' ? 'bg-green-900/40 text-green-400' :
                                 kw.status === 'content_planned' ? 'bg-blue-900/40 text-blue-400' :
+                                kw.status === 'approved' ? 'bg-emerald-900/40 text-emerald-400' :
                                 'bg-zinc-800 text-zinc-500'
                               }`}>
-                                {kw.status}
+                                {kw.status === 'approved' ? '✓ approved' : kw.status}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              {kw.status === 'tracking' && (
-                                <button
-                                  onClick={() => runAgent('writer', kw.company_id, { prompt: `write about "${kw.keyword}"` })}
-                                  disabled={agentRunning === `writer:${kw.company_id}`}
-                                  className="text-xs px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-50 transition-colors"
-                                >
-                                  {agentRunning === `writer:${kw.company_id}` ? 'Writing...' : 'Write Post'}
-                                </button>
-                              )}
+                              <div className="flex items-center justify-end gap-1.5">
+                                {(kw.status === 'tracking' || kw.status === 'approved') && (
+                                  <button
+                                    onClick={() => runAgent('writer', kw.company_id, { prompt: `write about "${kw.keyword}"` })}
+                                    disabled={agentRunning === `writer:${kw.company_id}`}
+                                    className="text-xs px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-50 transition-colors"
+                                  >
+                                    {agentRunning === `writer:${kw.company_id}` ? 'Writing...' : 'Write Post'}
+                                  </button>
+                                )}
+                                {kw.status === 'tracking' && (
+                                  <button
+                                    onClick={async () => {
+                                      await fetch('/api/admin/keywords', { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: kw.id, status: 'approved' }) })
+                                      fetchData()
+                                    }}
+                                    className="text-xs px-2 py-1 rounded-lg bg-emerald-900/30 hover:bg-emerald-900/50 text-emerald-400 transition-colors"
+                                  >
+                                    Approve
+                                  </button>
+                                )}
+                                {kw.status === 'approved' && (
+                                  <button
+                                    onClick={async () => {
+                                      await fetch('/api/admin/keywords', { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: kw.id, status: 'tracking' }) })
+                                      fetchData()
+                                    }}
+                                    className="text-xs px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-500 transition-colors"
+                                  >
+                                    Unapprove
+                                  </button>
+                                )}
+                                {(kw.status === 'tracking' || kw.status === 'approved') && (
+                                  <button
+                                    onClick={async () => {
+                                      await fetch(`/api/admin/keywords?id=${kw.id}`, { method: 'DELETE', headers })
+                                      fetchData()
+                                    }}
+                                    className="text-xs px-2 py-1 rounded-lg border border-zinc-800 hover:border-red-900 text-zinc-600 hover:text-red-500 transition-colors"
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         )

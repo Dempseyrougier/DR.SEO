@@ -22,13 +22,32 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ keywords: data ?? [] })
 }
 
-// Clear all keywords for a company
+// Delete a single keyword (id) or all keywords for a company (company_id)
 export async function DELETE(req: NextRequest) {
   if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const companyId = req.nextUrl.searchParams.get('company_id')
-  if (!companyId) return NextResponse.json({ error: 'company_id required' }, { status: 400 })
   const supabase = getSupabaseAdmin()
-  const { error } = await supabase.from('keywords').delete().eq('company_id', companyId)
+  const id = req.nextUrl.searchParams.get('id')
+  const companyId = req.nextUrl.searchParams.get('company_id')
+  if (id) {
+    const { error } = await supabase.from('keywords').delete().eq('id', id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true })
+  }
+  if (companyId) {
+    const { error } = await supabase.from('keywords').delete().eq('company_id', companyId)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true })
+  }
+  return NextResponse.json({ error: 'id or company_id required' }, { status: 400 })
+}
+
+// Update a keyword's status (e.g. approve/unapprove)
+export async function PATCH(req: NextRequest) {
+  if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { id, status } = await req.json()
+  if (!id || !status) return NextResponse.json({ error: 'id and status required' }, { status: 400 })
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase.from('keywords').update({ status }).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }
