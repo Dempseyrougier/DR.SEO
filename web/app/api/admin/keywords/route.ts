@@ -122,9 +122,11 @@ export async function POST(req: NextRequest) {
     const filtered = freshRanked.length - relevant.length
 
     // Phase 3: save relevant ranked keywords (with live positions)
-    if (relevant.length > 0) {
+    // Deduplicate within the batch (DataForSEO can return the same keyword twice)
+    const deduped = Array.from(new Map(relevant.map(k => [k.keyword.toLowerCase(), k])).values())
+    if (deduped.length > 0) {
       const { error: insertError } = await supabase.from('keywords').upsert(
-        relevant.map(k => ({
+        deduped.map(k => ({
           company_id,
           keyword: k.keyword,
           search_volume: k.searchVolume,
@@ -161,8 +163,9 @@ export async function POST(req: NextRequest) {
       const relevantIdeas = freshIdeas.filter(k => ideaRelevantSet.has(k.keyword.toLowerCase()))
 
       if (relevantIdeas.length > 0) {
+        const dedupedIdeas = Array.from(new Map(relevantIdeas.map(k => [k.keyword.toLowerCase(), k])).values())
         const { error: ideaInsertError } = await supabase.from('keywords').upsert(
-          relevantIdeas.map(k => ({
+          dedupedIdeas.map(k => ({
             company_id,
             keyword: k.keyword,
             search_volume: k.searchVolume,
@@ -171,13 +174,13 @@ export async function POST(req: NextRequest) {
           })),
           { onConflict: 'company_id,keyword' }
         )
-        if (!ideaInsertError) ideaCount = relevantIdeas.length
+        if (!ideaInsertError) ideaCount = dedupedIdeas.length
       }
     }
 
-    const total = relevant.length + ideaCount
+    const total = deduped.length + ideaCount
     const parts: string[] = []
-    if (relevant.length > 0) parts.push(`${relevant.length} keywords your site ranks for`)
+    if (deduped.length > 0) parts.push(`${deduped.length} keywords your site ranks for`)
     if (filtered > 0) parts.push(`${filtered} irrelevant/branded terms removed by AI`)
     if (ideaCount > 0) parts.push(`${ideaCount} additional opportunities added`)
     if (total === 0) parts.push('No new keywords found — try clearing and re-researching, or add target keywords in company settings')
