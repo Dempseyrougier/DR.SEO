@@ -270,14 +270,14 @@ Return ONLY valid JSON — no markdown, no commentary:
     return { error: 'Failed to parse writer output. Raw: ' + text.slice(0, 200) }
   }
 
-  const { error } = await supabase.from('posts').insert({
+  const { data: newPost, error } = await supabase.from('posts').insert({
     company_id: companyId,
     title: parsed.title,
     content: parsed.content,
     meta_description: parsed.meta_description,
     target_keyword: parsed.target_keyword,
     status: company.auto_publish ? 'approved' : 'draft',
-  })
+  }).select('id').single()
 
   if (error) return { error: error.message }
 
@@ -295,6 +295,15 @@ Return ONLY valid JSON — no markdown, no commentary:
   const kwInfo = selectedKeyword
     ? ` | Volume: ${selectedKeyword.searchVolume.toLocaleString()}/mo, Difficulty: ${selectedKeyword.difficulty}/100`
     : ''
+
+  // Auto-publish: if auto_publish is on, immediately send to WordPress/CMS
+  if (company.auto_publish && newPost?.id) {
+    const publishResult = await runPublisher(newPost.id)
+    if (publishResult.error) {
+      return { message: `Post "${parsed.title}" created but publish failed: ${publishResult.error}.${kwInfo}` }
+    }
+    return { message: `Post "${parsed.title}" written and published automatically.${kwInfo}` }
+  }
 
   return {
     message: `Post "${parsed.title}" created as ${company.auto_publish ? 'approved' : 'draft'}.${kwInfo}`,
@@ -407,6 +416,27 @@ async function runForAllCompanies(agent: string) {
   }
 }
 
+async function runPublisher(postId: string): Promise<{ message?: string; error?: string } | null> {
+  const supabase = getSupabaseAdmin()
+  const { data: post } = await supabase
+    .from('posts')
+    .select('*, companies(*)')
+    .eq('id', postId)
+    .single()
+
+  if (!post) return null
+
+  if (post.companies?.cms_type === 'wordpress' && post.companies?.wp_url) {
+    return publishToWordPress(post)
+  }
+  // Non-WP: mark published, user deploys manually
+  await supabase
+    .from('posts')
+    .update({ status: 'published', published_at: new Date().toISOString() })
+    .eq('id', postId)
+  return { message: 'Marked as published. Deploy manually for this CMS type.' }
+}
+
 export async function POST(req: NextRequest) {
   if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -427,26 +457,8 @@ export async function POST(req: NextRequest) {
       result = { message: 'Content refresh agent coming soon.' }
     } else if (agent === 'publisher') {
       // company_id here is actually a post id
-      const supabase = getSupabaseAdmin()
-      const { data: post } = await supabase
-        .from('posts')
-        .select('*, companies(*)')
-        .eq('id', company_id)
-        .single()
-
-      if (!post) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
-
-      if (post.companies?.cms_type === 'wordpress' && post.companies?.wp_url) {
-        const wpResult = await publishToWordPress(post)
-        result = wpResult
-      } else {
-        // Mark as published for non-WP sites (manual deploy)
-        await supabase
-          .from('posts')
-          .update({ status: 'published', published_at: new Date().toISOString() })
-          .eq('id', company_id)
-        result = { message: 'Marked as published. Deploy manually for this CMS type.' }
-      }
+      result = await runPublisher(company_id)
+      if (!result) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
     } else {
       result = { error: 'Unknown agent' }
     }
@@ -489,31 +501,15 @@ function buildLocalBusinessSchema(company: {
   wp_url: string
   industry: string
 }) {
-  const localConfigs: Record<string, object> = {
-    'experiencealoha.co': {
-      '@context': 'https://schema.org',
-      '@type': 'LocalBusiness',
-      name: company.name,
-      url: company.wp_url,
-      description: 'Luxury experiential events and destination proposal planning in Hawaii.',
-      address: { '@type': 'PostalAddress', addressLocality: 'Honolulu', addressRegion: 'HI', addressCountry: 'US' },
-      areaServed: { '@type': 'State', name: 'Hawaii' },
-      priceRange: '$$$',
-    },
-    'lowtidesailing.com': {
-      '@context': 'https://schema.org',
-      '@type': 'EducationalOrganization',
-      name: company.name,
-      url: company.wp_url,
-      description: 'IYT-certified sailing school offering courses in the Caribbean and Mediterranean.',
-      telephone: '+1-301-525-5106',
-      email: 'dan@lowtidesailing.com',
-      address: { '@type': 'PostalAddress', addressLocality: 'Brooklyn', addressRegion: 'NY', addressCountry: 'US' },
-      areaServed: { '@type': 'Country', name: 'United States' },
-      hasCredential: 'IYT International Yacht Training Certification',
-    },
+  // Generic LocalBusiness schema built from company data — works for any company
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'LocalBusiness',
+    name: company.name,
+    url: company.wp_url || `https://${company.domain}`,
+    description: `${company.name} — ${company.industry} services.`,
+    sameAs: [`https://${company.domain}`],
   }
-  return localConfigs[company.domain] ?? null
 }
 
 function buildHowToSchema(title: string, content: string) {

@@ -4,7 +4,11 @@ import { getSupabaseAdmin } from '../../../../lib/supabase'
 export const maxDuration = 60
 
 function auth(req: NextRequest) {
-  return req.headers.get('x-admin-key') === process.env.ADMIN_KEY
+  if (req.headers.get('x-admin-key') === process.env.ADMIN_KEY) return true
+  // Vercel Cron sends Authorization: Bearer <CRON_SECRET>
+  const cronSecret = process.env.CRON_SECRET
+  if (cronSecret && req.headers.get('authorization') === `Bearer ${cronSecret}`) return true
+  return false
 }
 
 // Check which companies are due for a new post and return a status report
