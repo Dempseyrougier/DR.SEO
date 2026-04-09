@@ -41,13 +41,13 @@ export async function DELETE(req: NextRequest) {
   return NextResponse.json({ error: 'id or company_id required' }, { status: 400 })
 }
 
-// Update a keyword's status (e.g. approve/unapprove)
+// Toggle focus flag on a keyword
 export async function PATCH(req: NextRequest) {
   if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const { id, status } = await req.json()
-  if (!id || !status) return NextResponse.json({ error: 'id and status required' }, { status: 400 })
+  const { id, focus } = await req.json()
+  if (!id || focus === undefined) return NextResponse.json({ error: 'id and focus required' }, { status: 400 })
   const supabase = getSupabaseAdmin()
-  const { error } = await supabase.from('keywords').update({ status }).eq('id', id)
+  const { error } = await supabase.from('keywords').update({ focus }).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

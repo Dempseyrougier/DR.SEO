@@ -55,7 +55,7 @@ async function runWriter(companyId: string, customPrompt?: string, referenceUrl?
       .from('keywords')
       .select('keyword, search_volume, difficulty')
       .eq('company_id', companyId)
-      .eq('status', 'approved')
+      .eq('focus', true)
       .not('keyword', 'in', `(${existingKeywords.map(k => `"${k}"`).join(',') || '""'})`)
       .order('search_volume', { ascending: false })
       .limit(1)

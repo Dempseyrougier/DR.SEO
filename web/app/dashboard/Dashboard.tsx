@@ -15,6 +15,7 @@ type Keyword = {
   difficulty: number | null
   current_rank: number | null
   status: string
+  focus: boolean
   created_at: string
 }
 
@@ -35,6 +36,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
   const [researchResult, setResearchResult] = useState<Record<string, string>>({})
   const [clearingKeywords, setClearingKeywords] = useState<string | null>(null)
   const [kwFilterStatus, setKwFilterStatus] = useState('')
+  const [kwFilterFocus, setKwFilterFocus] = useState(false)
   const [checkingRankings, setCheckingRankings] = useState<string | null>(null)
   const [rankingResult, setRankingResult] = useState<Record<string, string>>({})
   const [competitorInput, setCompetitorInput] = useState<Record<string, string>>({})
@@ -157,11 +159,11 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
     if (res.ok) fetchData()
   }
 
-  async function setKeywordStatus(id: string, status: string) {
+  async function toggleKeywordFocus(id: string, focus: boolean) {
     const res = await fetch('/api/admin/keywords', {
       method: 'PATCH',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status }),
+      body: JSON.stringify({ id, focus }),
     })
     const data = await res.json()
     if (!res.ok) { alert(`Failed to update keyword: ${data.error}`); return }
@@ -216,6 +218,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
   const filteredKeywords = keywords.filter(k => {
     if (kwFilterCompany && k.company_id !== kwFilterCompany) return false
     if (kwFilterStatus && k.status !== kwFilterStatus) return false
+    if (kwFilterFocus && !k.focus) return false
     return true
   })
 
@@ -676,10 +679,15 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                 >
                   <option value="">All statuses</option>
                   <option value="tracking">Tracking</option>
-                  <option value="approved">Approved</option>
                   <option value="content_planned">Content planned</option>
                   <option value="published">Published</option>
                 </select>
+                <button
+                  onClick={() => setKwFilterFocus(f => !f)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${kwFilterFocus ? 'border-yellow-600 text-yellow-400 bg-yellow-900/20' : 'border-zinc-700 text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  ★ Focused only
+                </button>
                 <span className="text-xs text-zinc-600 ml-auto">{filteredKeywords.length} keywords</span>
               </div>
 
@@ -744,23 +752,14 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                                     {agentRunning === `writer:${kw.company_id}` ? 'Writing...' : 'Write Post'}
                                   </button>
                                 )}
-                                {kw.status === 'tracking' && (
-                                  <button
-                                    onClick={() => setKeywordStatus(kw.id, 'approved')}
-                                    className="text-xs px-2 py-1 rounded-lg bg-emerald-900/30 hover:bg-emerald-900/50 text-emerald-400 transition-colors"
-                                  >
-                                    Approve
-                                  </button>
-                                )}
-                                {kw.status === 'approved' && (
-                                  <button
-                                    onClick={() => setKeywordStatus(kw.id, 'tracking')}
-                                    className="text-xs px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-500 transition-colors"
-                                  >
-                                    Unapprove
-                                  </button>
-                                )}
-                                {(kw.status === 'tracking' || kw.status === 'approved') && (
+                                <button
+                                  onClick={() => toggleKeywordFocus(kw.id, !kw.focus)}
+                                  title={kw.focus ? 'Remove focus — writer will deprioritize' : 'Focus — writer will target this keyword next'}
+                                  className={`text-sm px-1.5 py-1 rounded transition-colors ${kw.focus ? 'text-yellow-400 hover:text-yellow-500' : 'text-zinc-700 hover:text-zinc-400'}`}
+                                >
+                                  {kw.focus ? '★' : '☆'}
+                                </button>
+                                {(kw.status === 'tracking' || kw.status === 'content_planned') && (
                                   <button
                                     onClick={() => removeKeyword(kw.id)}
                                     className="text-xs px-2 py-1 rounded-lg border border-zinc-800 hover:border-red-900 text-zinc-600 hover:text-red-500 transition-colors"
