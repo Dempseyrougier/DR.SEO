@@ -610,16 +610,42 @@ async function publishToWordPress(post: {
   // SEO title: prefer stored seo_title field if available, otherwise trim H1 to 60 chars
   const seoTitle = post.title.length <= 60 ? post.title : post.title.slice(0, 57) + '...'
 
+  // Strip leading H1 — WordPress renders the post title as H1 itself
+  const contentNoH1 = post.content.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '')
+
+  // Auto-fetch a featured image from Unsplash using the post keyword/title
+  let featuredImageBlock = ''
+  const unsplashKey = process.env.UNSPLASH_ACCESS_KEY
+  if (unsplashKey) {
+    try {
+      const searchTerm = encodeURIComponent(post.title.split(' ').slice(0, 4).join(' '))
+      const imgRes = await fetch(
+        `https://api.unsplash.com/search/photos?query=${searchTerm}&per_page=1&orientation=landscape`,
+        { headers: { Authorization: `Client-ID ${unsplashKey}` }, signal: AbortSignal.timeout(5000) }
+      )
+      if (imgRes.ok) {
+        const imgData = await imgRes.json()
+        const img = imgData.results?.[0]
+        if (img) {
+          const credit = `Photo by <a href="${img.user.links.html}?utm_source=dr_seo&utm_medium=referral" target="_blank" rel="noopener">${img.user.name}</a> on <a href="https://unsplash.com?utm_source=dr_seo&utm_medium=referral" target="_blank" rel="noopener">Unsplash</a>`
+          featuredImageBlock = `<figure style="margin:0 0 32px 0;"><img src="${img.urls.regular}" alt="${post.title}" style="width:100%;border-radius:8px;" /><figcaption style="font-size:12px;color:#888;margin-top:8px;">${credit}</figcaption></figure>\n\n`
+        }
+      }
+    } catch { /* non-fatal — publish without image */ }
+  }
+
+  const contentWithImage = featuredImageBlock + contentNoH1
+
   // Build and inject structured data schemas
   const schemas: object[] = []
   schemas.push(buildArticleSchema(post, post.companies))
   const localSchema = buildLocalBusinessSchema(post.companies)
   if (localSchema) schemas.push(localSchema)
-  const howToSchema = buildHowToSchema(post.title, post.content)
+  const howToSchema = buildHowToSchema(post.title, contentNoH1)
   if (howToSchema) schemas.push(howToSchema)
-  const faqSchema = buildFAQSchema(post.content)
+  const faqSchema = buildFAQSchema(contentNoH1)
   if (faqSchema) schemas.push(faqSchema)
-  const contentWithSchemas = injectSchemas(post.content, schemas)
+  const contentWithSchemas = injectSchemas(contentWithImage, schemas)
 
   const body = JSON.stringify({
     title: post.title,
