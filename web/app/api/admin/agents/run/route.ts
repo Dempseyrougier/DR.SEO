@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from '../../../../../lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 import { getKeywordIdeas, getSearchVolumes, selectBestKeyword, analyzeSerpIntent, classifyIntent, type SerpIntent } from '../../../../../lib/dataforseo'
 
-export const maxDuration = 60
+export const maxDuration = 300
 export const preferredRegion = ['iad1']
 
 function auth(req: NextRequest) {
@@ -212,8 +212,8 @@ ${selectedKeyword
 }
 ${serpIntent ? `- CONTENT FORMAT: Write as a ${serpIntent.format} — ${serpIntent.recommendation}` : ''}
 ${customPrompt ? `- User-requested angle: "${customPrompt}" — prioritize this direction` : ''}
-- Word count: 900–1,200 words
-- Structure: H1 title, 3–5 H2 sections, H3 subsections where appropriate
+- Word count: 1,400–1,800 words
+- Structure: H1 title, 4–6 H2 sections, H3 subsections where appropriate
 - Include a FAQ section at the end (4–5 questions with direct answers in <h3>/<p> format)
 - Weave in 3–5 secondary/related keywords naturally throughout
 - Write with E-E-A-T in mind: real expertise, specific details, data points — no generic filler
@@ -282,7 +282,7 @@ Return ONLY valid JSON — no markdown, no commentary:
     : `Write the next SEO blog post for ${company.name}. Use the research-validated keyword above. Make it genuinely useful — the kind of content that earns backlinks and ranks.`
 
   const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: 'claude-sonnet-4-6',
     max_tokens: 6000,
     messages: [{ role: 'user', content: userMessage }],
     system: systemPrompt,
