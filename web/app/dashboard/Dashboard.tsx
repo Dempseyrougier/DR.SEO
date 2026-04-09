@@ -157,6 +157,24 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
     if (res.ok) fetchData()
   }
 
+  async function setKeywordStatus(id: string, status: string) {
+    const res = await fetch('/api/admin/keywords', {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status }),
+    })
+    const data = await res.json()
+    if (!res.ok) { alert(`Failed to update keyword: ${data.error}`); return }
+    fetchData()
+  }
+
+  async function removeKeyword(id: string) {
+    const res = await fetch(`/api/admin/keywords?id=${id}`, { method: 'DELETE', headers })
+    const data = await res.json()
+    if (!res.ok) { alert(`Failed to remove keyword: ${data.error}`); return }
+    fetchData()
+  }
+
   async function clearKeywords(companyId: string, companyName: string) {
     if (!confirm(`Delete all keywords for ${companyName}? This cannot be undone.`)) return
     setClearingKeywords(companyId)
@@ -728,10 +746,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                                 )}
                                 {kw.status === 'tracking' && (
                                   <button
-                                    onClick={async () => {
-                                      await fetch('/api/admin/keywords', { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: kw.id, status: 'approved' }) })
-                                      fetchData()
-                                    }}
+                                    onClick={() => setKeywordStatus(kw.id, 'approved')}
                                     className="text-xs px-2 py-1 rounded-lg bg-emerald-900/30 hover:bg-emerald-900/50 text-emerald-400 transition-colors"
                                   >
                                     Approve
@@ -739,10 +754,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                                 )}
                                 {kw.status === 'approved' && (
                                   <button
-                                    onClick={async () => {
-                                      await fetch('/api/admin/keywords', { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: kw.id, status: 'tracking' }) })
-                                      fetchData()
-                                    }}
+                                    onClick={() => setKeywordStatus(kw.id, 'tracking')}
                                     className="text-xs px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-500 transition-colors"
                                   >
                                     Unapprove
@@ -750,10 +762,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                                 )}
                                 {(kw.status === 'tracking' || kw.status === 'approved') && (
                                   <button
-                                    onClick={async () => {
-                                      await fetch(`/api/admin/keywords?id=${kw.id}`, { method: 'DELETE', headers })
-                                      fetchData()
-                                    }}
+                                    onClick={() => removeKeyword(kw.id)}
                                     className="text-xs px-2 py-1 rounded-lg border border-zinc-800 hover:border-red-900 text-zinc-600 hover:text-red-500 transition-colors"
                                   >
                                     ✕
