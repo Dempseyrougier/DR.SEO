@@ -264,12 +264,27 @@ Return ONLY valid JSON — no markdown, no commentary:
     ? `Write an SEO blog post for ${company.name} about: ${customPrompt}. Make it genuinely useful — the kind of content that earns backlinks and ranks.`
     : `Write the next SEO blog post for ${company.name}. Use the research-validated keyword above. Make it genuinely useful — the kind of content that earns backlinks and ranks.`
 
-  const message = await anthropic.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
-    max_tokens: 4096,
-    messages: [{ role: 'user', content: userMessage }],
-    system: systemPrompt,
+  // Use raw fetch to bypass SDK — diagnose if SDK or key is the issue
+  const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': process.env.ANTHROPIC_API_KEY!,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+    }),
   })
+  if (!anthropicRes.ok) {
+    const errText = await anthropicRes.text()
+    return { error: `Anthropic ${anthropicRes.status}: ${errText}` }
+  }
+  const anthropicData = await anthropicRes.json()
+  const message = { content: anthropicData.content as Array<{ type: string; text: string }> }
 
   const text = message.content[0].type === 'text' ? message.content[0].text : ''
   let parsed: {
