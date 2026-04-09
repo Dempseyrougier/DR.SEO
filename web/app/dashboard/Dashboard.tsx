@@ -35,6 +35,8 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
   const [researchingKeywords, setResearchingKeywords] = useState<string | null>(null)
   const [researchResult, setResearchResult] = useState<Record<string, string>>({})
   const [clearingKeywords, setClearingKeywords] = useState<string | null>(null)
+  const [manualKeywordInput, setManualKeywordInput] = useState<Record<string, string>>({})
+  const [addingKeywords, setAddingKeywords] = useState<string | null>(null)
   const [kwFilterStatus, setKwFilterStatus] = useState('')
   const [kwFilterFocus, setKwFilterFocus] = useState(false)
   const [checkingRankings, setCheckingRankings] = useState<string | null>(null)
@@ -633,6 +635,43 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                     {researchResult[company.id] && (
                       <p className="text-xs text-zinc-500 mt-2">{researchResult[company.id]}</p>
                     )}
+
+                    {/* Manual keyword entry */}
+                    <div className="mt-3 pt-3 border-t border-zinc-800">
+                      <p className="text-xs text-zinc-500 mb-2">Add keywords manually</p>
+                      <div className="flex gap-2 items-start">
+                        <textarea
+                          value={manualKeywordInput[company.id] ?? ''}
+                          onChange={e => setManualKeywordInput(prev => ({ ...prev, [company.id]: e.target.value }))}
+                          placeholder={"One keyword per line:\nhawaii sailing tours\ncatamaran oahu\nsunset cruise honolulu"}
+                          rows={3}
+                          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
+                        />
+                        <button
+                          disabled={addingKeywords === company.id || !manualKeywordInput[company.id]?.trim()}
+                          onClick={async () => {
+                            const raw = manualKeywordInput[company.id] ?? ''
+                            const keywords = raw.split('\n').map(k => k.trim()).filter(Boolean)
+                            if (!keywords.length) return
+                            setAddingKeywords(company.id)
+                            const res = await fetch('/api/admin/keywords', {
+                              method: 'POST',
+                              headers: { ...headers, 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ company_id: company.id, manual_keywords: keywords }),
+                            })
+                            const data = await res.json()
+                            if (!res.ok) { alert(data.error); setAddingKeywords(null); return }
+                            setManualKeywordInput(prev => ({ ...prev, [company.id]: '' }))
+                            setAddingKeywords(null)
+                            fetchData()
+                          }}
+                          className="text-xs px-3 py-2 rounded-lg bg-white text-black font-semibold disabled:opacity-40 hover:bg-zinc-200 transition-colors shrink-0"
+                        >
+                          {addingKeywords === company.id ? 'Adding...' : 'Add'}
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Competitor gap analysis */}
                     <div className="mt-3 pt-3 border-t border-zinc-800">
                       <p className="text-xs text-zinc-600 mb-2">Competitor gap analysis</p>

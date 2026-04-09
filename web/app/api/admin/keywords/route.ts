@@ -110,7 +110,24 @@ Example: ["sailing tours hawaii", "catamaran oahu sunset"]`,
 // Research new keyword opportunities for a company
 export async function POST(req: NextRequest) {
   if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const { company_id } = await req.json()
+  const { company_id, manual_keywords } = await req.json()
+
+  // Manual add: skip research pipeline, insert directly
+  if (manual_keywords?.length) {
+    const supabase = getSupabaseAdmin()
+    const terms: string[] = manual_keywords
+      .map((k: string) => k.trim().toLowerCase())
+      .filter((k: string) => k.length > 0)
+
+    const deduped = Array.from(new Set(terms))
+
+    const { error } = await supabase.from('keywords').upsert(
+      deduped.map(k => ({ company_id, keyword: k, status: 'tracking', focus: false })),
+      { onConflict: 'company_id,keyword' }
+    )
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ found: deduped.length, message: `Added ${deduped.length} keyword${deduped.length !== 1 ? 's' : ''}.` })
+  }
   const supabase = getSupabaseAdmin()
 
   const { data: company, error: companyError } = await supabase
