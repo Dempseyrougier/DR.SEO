@@ -72,34 +72,35 @@ async function runWriter(companyId: string, customPrompt?: string, referenceUrl?
   }
 
   try {
-    // If user gave a custom prompt, research that topic directly
-    // Otherwise generate keyword candidates via Claude first
-    let seedKeywords: string[] = []
+    if (preselectedFromDb) {
+      // Keyword already chosen from DB — skip all research calls entirely
+      const intent = classifyIntent(preselectedFromDb)
+      keywordContext = `\n## Keyword selected from approved list\nPrimary keyword: "${preselectedFromDb}"\nSearch intent: ${intent}`
+    } else {
+      // No pre-selected keyword — run full research pipeline
+      let seedKeywords: string[] = []
 
-    if (customPrompt) {
-      // Extract key phrases from the custom prompt as seeds
-      const seedRes = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 256,
-        messages: [{
-          role: 'user',
-          content: `Given this blog topic request: "${customPrompt}"
+      if (customPrompt) {
+        const seedRes = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 256,
+          messages: [{
+            role: 'user',
+            content: `Given this blog topic request: "${customPrompt}"
 And this industry: ${company.industry}
 Generate 6 specific long-tail keyword phrases someone would search for related to this topic.
 Return ONLY a JSON array of strings: ["keyword 1", "keyword 2", ...]`,
-        }],
-      })
-      const seedText = seedRes.content[0].type === 'text' ? seedRes.content[0].text : '[]'
-      const seedMatch = seedText.match(/\[[\s\S]*\]/)
-      seedKeywords = JSON.parse(seedMatch?.[0] ?? '[]')
-    } else {
-      // Generate keyword candidates from company info
-      const seedRes = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 256,
-        messages: [{
-          role: 'user',
-          content: `Company: ${company.name}
+          }],
+        })
+        const seedText = seedRes.content[0].type === 'text' ? seedRes.content[0].text : '[]'
+        seedKeywords = JSON.parse(seedText.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
+      } else {
+        const seedRes = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 256,
+          messages: [{
+            role: 'user',
+            content: `Company: ${company.name}
 Industry: ${company.industry}
 Existing keywords covered: ${existingKeywords.join(', ') || 'none'}
 Target keyword areas: ${targetKeywords}
@@ -107,18 +108,13 @@ Target keyword areas: ${targetKeywords}
 Generate 8 specific long-tail keyword phrases this company could rank for that are NOT in the existing list.
 Focus on commercial and informational intent. Be specific, not generic.
 Return ONLY a JSON array of strings: ["keyword 1", "keyword 2", ...]`,
-        }],
-      })
-      const seedText = seedRes.content[0].type === 'text' ? seedRes.content[0].text : '[]'
-      const seedMatch = seedText.match(/\[[\s\S]*\]/)
-      seedKeywords = JSON.parse(seedMatch?.[0] ?? '[]')
-    }
+          }],
+        })
+        const seedText = seedRes.content[0].type === 'text' ? seedRes.content[0].text : '[]'
+        seedKeywords = JSON.parse(seedText.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
+      }
 
-    if (preselectedFromDb) {
-      // Already selected from approved keywords — skip all DataForSEO calls to stay within timeout
-      const intent = classifyIntent(preselectedFromDb)
-      keywordContext = `\n## Keyword selected from approved list\nPrimary keyword: "${preselectedFromDb}"\nSearch intent: ${intent}`
-    } else if (seedKeywords.length > 0) {
+      if (seedKeywords.length > 0) {
       // Get keyword ideas + difficulty from DataForSEO Labs
       const ideas = await getKeywordIdeas(seedKeywords.slice(0, 4), locationCode)
 
@@ -158,7 +154,8 @@ Writing recommendation: ${serpIntent.recommendation}
 Top ranking titles (match this style and depth):
 ${serpIntent.topResults.slice(0, 5).map((r, i) => `${i + 1}. "${r.title}"`).join('\n')}` : ''}`
       }
-    }
+      } // end seedKeywords.length > 0
+    } // end else (no preselectedFromDb)
   } catch (err) {
     // DataForSEO failed — fall back to Claude-only keyword selection
     console.error('DataForSEO keyword research failed:', err)
