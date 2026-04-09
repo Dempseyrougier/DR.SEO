@@ -241,9 +241,29 @@ AI assistants (Perplexity, ChatGPT, Google AI Overview) cite content that is str
 ## HTML output requirements
 - Use semantic HTML: <h2>, <h3>, <p>, <ul>, <ol>, <strong>
 - FAQ section: use <h3> for each question, <p> for each answer (required for FAQPage schema extraction)
-- Add [INTERNAL_LINK: suggested topic] placeholders where other internal links would help
 - Do NOT include <html>, <head>, or <body> tags — content only
 - Do NOT add JSON-LD script tags — the publishing system handles schema injection automatically
+- Do NOT include [INTERNAL_LINK: ...] placeholders — omit them entirely
+
+## Formatting that makes posts look professional
+Use these HTML patterns to break up long text and add visual interest:
+
+Stat callout box (use for striking data points):
+<div style="background:#f0f7ff;border-left:4px solid #0066cc;padding:16px 20px;margin:24px 0;border-radius:4px;">
+  <strong>Key stat:</strong> [insert specific statistic or data point here]
+</div>
+
+Pull quote (use for a compelling one-liner from the text):
+<blockquote style="border-left:4px solid #ddd;margin:24px 0;padding:12px 20px;font-style:italic;color:#555;font-size:1.05em;">
+  [memorable quote or takeaway]
+</blockquote>
+
+CTA block at end of article (always finish with this):
+<div style="background:#0a1628;color:#fff;padding:28px 32px;border-radius:8px;margin:40px 0;text-align:center;">
+  <h3 style="color:#fff;margin:0 0 8px 0;font-size:1.3em;">[compelling CTA headline]</h3>
+  <p style="color:#ccc;margin:0 0 20px 0;">[one-sentence supporting line]</p>
+  <a href="${moneyPageUrl ?? `https://${company.domain}`}" style="background:#fff;color:#0a1628;padding:12px 28px;border-radius:6px;font-weight:700;text-decoration:none;display:inline-block;">[CTA button text]</a>
+</div>
 
 ## Response format
 Return ONLY valid JSON — no markdown, no commentary:
@@ -611,7 +631,12 @@ async function publishToWordPress(post: {
   const seoTitle = post.title.length <= 60 ? post.title : post.title.slice(0, 57) + '...'
 
   // Strip leading H1 — WordPress renders the post title as H1 itself
-  const contentNoH1 = post.content.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '')
+  const contentNoH1 = post.content
+    .replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '')
+    // Remove [INTERNAL_LINK: ...] placeholders left by the writer
+    .replace(/\[INTERNAL_LINK:[^\]]*\]/g, '')
+    // Clean up any empty <p> tags that result
+    .replace(/<p>\s*<\/p>/g, '')
 
   // Auto-fetch a featured image from Unsplash using the post keyword/title
   let featuredImageBlock = ''
