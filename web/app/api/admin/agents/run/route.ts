@@ -283,7 +283,7 @@ Return ONLY valid JSON — no markdown, no commentary:
 
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 3000,
+    max_tokens: 4096,
     messages: [{ role: 'user', content: userMessage }],
     system: systemPrompt,
   })
