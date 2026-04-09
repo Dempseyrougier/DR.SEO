@@ -114,8 +114,7 @@ Return ONLY a JSON array of strings: ["keyword 1", "keyword 2", ...]`,
     }
 
     if (preselectedFromDb) {
-      // Already selected from approved keywords — skip DataForSEO seed research
-      try { serpIntent = await analyzeSerpIntent(preselectedFromDb, locationCode) } catch { /* non-fatal */ }
+      // Already selected from approved keywords — skip all DataForSEO calls to stay within timeout
       const intent = classifyIntent(preselectedFromDb)
       keywordContext = `\n## Keyword selected from approved list\nPrimary keyword: "${preselectedFromDb}"\nSearch intent: ${intent}`
     } else if (seedKeywords.length > 0) {
@@ -194,7 +193,7 @@ ${serpIntent.topResults.slice(0, 5).map((r, i) => `${i + 1}. "${r.title}"`).join
   }
 
   // ── Step 3: Write the post ─────────────────────────────────────────────────
-  const systemPrompt = `You are a senior SEO content strategist and writer. Your posts consistently rank on page 1 of Google.
+  const systemPrompt = `You are a senior SEO content strategist and writer. Your posts consistently rank on page 1 of Google AND get cited by AI assistants like ChatGPT, Perplexity, and Google AI Overviews.
 
 ## Company
 Name: ${company.name}
@@ -217,18 +216,36 @@ ${serpIntent ? `- CONTENT FORMAT: Write as a ${serpIntent.format} — ${serpInte
 ${customPrompt ? `- User-requested angle: "${customPrompt}" — prioritize this direction` : ''}
 - Word count: 1,500–2,000 words
 - Structure: H1 title, 4–6 H2 sections, H3 subsections where appropriate
-- Include a FAQ section at the end (4–5 questions with direct answers)
+- Include a FAQ section at the end (4–5 questions with direct answers in <h3>/<p> format)
 - Weave in 3–5 secondary/related keywords naturally throughout
 - Write with E-E-A-T in mind: real expertise, specific details, data points — no generic filler
 - End with a clear call-to-action relevant to the business
 ${moneyPageUrl ? `- MONEY PAGE LINK: Naturally include one contextual link to ${moneyPageUrl} — this is the most important page on the site. Anchor text should be descriptive and keyword-rich, never generic ("click here").` : ''}
 - Match the brand voice guidelines exactly
 
+## GEO (Generative Engine Optimization) requirements — CRITICAL
+AI assistants (Perplexity, ChatGPT, Google AI Overview) cite content that is structured for direct extraction. Follow ALL of these:
+
+1. DIRECT ANSWER FIRST: The very first paragraph after the H1 must directly answer the core question implied by the keyword in 2–3 sentences. No preamble, no "In this article we'll explore..." — just the answer.
+
+2. CONVERSATIONAL H2 HEADINGS: Phrase H2s as questions the reader would actually type or say:
+   - Good: "How Long Does It Take to Get a Sailing Certificate?"
+   - Bad: "Certification Timeline Overview"
+
+3. STATISTICS AND SPECIFICS: Include at least 3 specific data points, numbers, or percentages per article. Cite the source inline (e.g., "According to the US Coast Guard..." or "Studies show 73% of..."). Real numbers only — do not fabricate statistics.
+
+4. ENTITY SIGNALS: In the introduction or a dedicated section, clearly establish WHO the business is, WHAT they do, WHERE they operate, and WHY they are authoritative (years in business, certifications, notable credentials). This helps AI models correctly identify and cite ${company.name}.
+
+5. DEFINITION BOXES: For any technical term or concept central to the topic, include a bolded definition sentence immediately after first use: e.g., <p><strong>[Term]</strong> is defined as...</p>
+
+6. FAQ SECTION STRUCTURE: The FAQ section MUST use <h3> tags for each question and <p> tags for each answer, formatted so each Q&A pair is immediately extractable. Minimum 4 pairs, maximum 8.
+
 ## HTML output requirements
 - Use semantic HTML: <h2>, <h3>, <p>, <ul>, <ol>, <strong>
-- Add a FAQ schema JSON-LD <script> block at the very end covering the FAQ questions
+- FAQ section: use <h3> for each question, <p> for each answer (required for FAQPage schema extraction)
 - Add [INTERNAL_LINK: suggested topic] placeholders where other internal links would help
 - Do NOT include <html>, <head>, or <body> tags — content only
+- Do NOT add JSON-LD script tags — the publishing system handles schema injection automatically
 
 ## Response format
 Return ONLY valid JSON — no markdown, no commentary:
@@ -247,7 +264,7 @@ Return ONLY valid JSON — no markdown, no commentary:
     : `Write the next SEO blog post for ${company.name}. Use the research-validated keyword above. Make it genuinely useful — the kind of content that earns backlinks and ranks.`
 
   const message = await anthropic.messages.create({
-    model: 'claude-opus-4-6',
+    model: 'claude-sonnet-4-6',
     max_tokens: 8192,
     messages: [{ role: 'user', content: userMessage }],
     system: systemPrompt,
@@ -349,7 +366,6 @@ async function runCitationCheck(companyId: string) {
       const data = await res.json()
       const items: Array<{ title: string; link: string; snippet: string }> = data.items ?? []
 
-      // Check if brand domain appears in any result
       const brandLower = company.name.toLowerCase()
       const domainLower = company.domain.toLowerCase()
 
@@ -359,14 +375,10 @@ async function runCitationCheck(companyId: string) {
 
       for (let i = 0; i < items.length; i++) {
         const item = items[i]
-        const linkLower = item.link.toLowerCase()
-        const titleLower = item.title.toLowerCase()
-        const snippetLower = item.snippet.toLowerCase()
-
         if (
-          linkLower.includes(domainLower) ||
-          titleLower.includes(brandLower) ||
-          snippetLower.includes(brandLower)
+          item.link.toLowerCase().includes(domainLower) ||
+          item.title.toLowerCase().includes(brandLower) ||
+          item.snippet.toLowerCase().includes(brandLower)
         ) {
           cited = true
           position = i + 1
@@ -378,7 +390,7 @@ async function runCitationCheck(companyId: string) {
       await supabase.from('citation_logs').insert({
         company_id: companyId,
         query,
-        source: 'google_ai',
+        source: 'google_search',
         cited,
         snippet,
       })
@@ -395,7 +407,7 @@ async function runCitationCheck(companyId: string) {
     .sort((a, b) => (a.position ?? 99) - (b.position ?? 99))[0]?.position
 
   return {
-    message: `Checked ${results.length} queries via Google Search. Appearing in ${citedCount}/${results.length}.${bestPosition ? ` Best position: #${bestPosition}.` : ' Not yet ranking for tracked queries.'}`,
+    message: `Checked ${results.length} queries via Google Search. ${company.name} appearing in ${citedCount}/${results.length}.${bestPosition ? ` Best position: #${bestPosition}.` : ' Not yet ranking for tracked queries.'}`,
   }
 }
 
@@ -513,6 +525,36 @@ function buildLocalBusinessSchema(company: {
   }
 }
 
+function buildFAQSchema(content: string) {
+  // Extract FAQ pairs from common patterns: <strong>Q</strong> followed by answer,
+  // or consecutive <h3> + <p> pairs inside a FAQ section
+  const faqSection = content.match(/(?:faq|frequently asked|common questions?)[\s\S]{0,5000}/i)?.[0] ?? content
+
+  // Match <h3>Question?</h3> followed by content up to next <h3> or end
+  const pairs: Array<{ question: string; answer: string }> = []
+  const h3Matches = [...faqSection.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>([\s\S]*?)(?=<h3|$)/gi)]
+
+  for (const m of h3Matches) {
+    const question = m[1].replace(/<[^>]+>/g, '').trim()
+    const answer = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)
+    if (question.length > 10 && answer.length > 20) {
+      pairs.push({ question, answer })
+    }
+  }
+
+  if (pairs.length < 2) return null
+
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: pairs.slice(0, 8).map(p => ({
+      '@type': 'Question',
+      name: p.question,
+      acceptedAnswer: { '@type': 'Answer', text: p.answer },
+    })),
+  }
+}
+
 function buildHowToSchema(title: string, content: string) {
   if (!/\bhow to\b/i.test(title)) return null
 
@@ -577,6 +619,8 @@ async function publishToWordPress(post: {
   if (localSchema) schemas.push(localSchema)
   const howToSchema = buildHowToSchema(post.title, post.content)
   if (howToSchema) schemas.push(howToSchema)
+  const faqSchema = buildFAQSchema(post.content)
+  if (faqSchema) schemas.push(faqSchema)
   const contentWithSchemas = injectSchemas(post.content, schemas)
 
   const body = JSON.stringify({
@@ -623,7 +667,7 @@ async function publishToWordPress(post: {
 
   await supabase
     .from('posts')
-    .update({ status: 'published', published_at: new Date().toISOString(), wp_post_id: wpPost.id })
+    .update({ status: 'published', published_at: new Date().toISOString(), wp_post_id: wpPost.id, schema_injected: true })
     .eq('id', post.id)
 
   return { message: `Published to WordPress (post #${wpPost.id}, slug: ${slug}).` }

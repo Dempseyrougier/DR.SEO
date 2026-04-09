@@ -880,7 +880,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                 {
                   id: 'citation',
                   name: 'Citation Monitor',
-                  description: 'Searches Google for brand mentions and AI citation signals across the web. Logs results per company to track brand visibility over time.',
+                  description: 'Searches Google for brand mentions, domain appearances, and review signals across the web. Logs results per company to track search visibility over time.',
                   action: 'Check all brands',
                   available: true,
                 },
