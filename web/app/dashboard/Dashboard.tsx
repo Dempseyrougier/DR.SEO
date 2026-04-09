@@ -387,7 +387,22 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                             />
                           </button>
                         </div>
-                        <span className="text-xs text-zinc-500">{company.posts_per_week}x/week</span>
+                        <select
+                          value={company.posts_per_week}
+                          onChange={async e => {
+                            await fetch('/api/admin/companies', {
+                              method: 'PATCH',
+                              headers: { ...headers, 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ id: company.id, posts_per_week: Number(e.target.value) }),
+                            })
+                            fetchData()
+                          }}
+                          className="text-xs rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-300 focus:outline-none focus:border-zinc-500"
+                        >
+                          {[1, 2, 3, 4, 5, 6, 7].map(n => (
+                            <option key={n} value={n}>{n}x/week</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                     {company.voice_guidelines && (
