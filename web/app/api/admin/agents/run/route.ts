@@ -212,8 +212,8 @@ ${selectedKeyword
 }
 ${serpIntent ? `- CONTENT FORMAT: Write as a ${serpIntent.format} — ${serpIntent.recommendation}` : ''}
 ${customPrompt ? `- User-requested angle: "${customPrompt}" — prioritize this direction` : ''}
-- Word count: 1,500–2,000 words
-- Structure: H1 title, 4–6 H2 sections, H3 subsections where appropriate
+- Word count: 900–1,200 words
+- Structure: H1 title, 3–5 H2 sections, H3 subsections where appropriate
 - Include a FAQ section at the end (4–5 questions with direct answers in <h3>/<p> format)
 - Weave in 3–5 secondary/related keywords naturally throughout
 - Write with E-E-A-T in mind: real expertise, specific details, data points — no generic filler
@@ -263,7 +263,7 @@ Return ONLY valid JSON — no markdown, no commentary:
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+    max_tokens: 2048,
     messages: [{ role: 'user', content: userMessage }],
     system: systemPrompt,
   })
