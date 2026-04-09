@@ -263,24 +263,12 @@ Return ONLY valid JSON — no markdown, no commentary:
     ? `Write an SEO blog post for ${company.name} about: ${customPrompt}. Make it genuinely useful — the kind of content that earns backlinks and ranks.`
     : `Write the next SEO blog post for ${company.name}. Use the research-validated keyword above. Make it genuinely useful — the kind of content that earns backlinks and ranks.`
 
-  // Retry up to 3 times on overload (529)
-  let message: Awaited<ReturnType<typeof anthropic.messages.create>> | null = null
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      message = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8192,
-        messages: [{ role: 'user', content: userMessage }],
-        system: systemPrompt,
-      })
-      break
-    } catch (err) {
-      const isOverload = err instanceof Error && err.message.includes('overloaded')
-      if (!isOverload || attempt === 2) throw err
-      await new Promise(r => setTimeout(r, (attempt + 1) * 5000))
-    }
-  }
-  if (!message) throw new Error('Writer failed after retries')
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 8192,
+    messages: [{ role: 'user', content: userMessage }],
+    system: systemPrompt,
+  })
 
   const text = message.content[0].type === 'text' ? message.content[0].text : ''
   let parsed: {
