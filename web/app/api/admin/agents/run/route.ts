@@ -265,7 +265,7 @@ Return ONLY valid JSON — no markdown, no commentary:
     : `Write the next SEO blog post for ${company.name}. Use the research-validated keyword above. Make it genuinely useful — the kind of content that earns backlinks and ranks.`
 
   const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-3-5-sonnet-20241022',
     max_tokens: 4096,
     messages: [{ role: 'user', content: userMessage }],
     system: systemPrompt,
