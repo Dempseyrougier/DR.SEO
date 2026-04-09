@@ -299,7 +299,7 @@ Return ONLY valid JSON — no markdown, no commentary:
   // Auto-publish: if auto_publish is on, immediately send to WordPress/CMS
   if (company.auto_publish && newPost?.id) {
     const publishResult = await runPublisher(newPost.id)
-    if (publishResult.error) {
+    if (publishResult?.error) {
       return { message: `Post "${parsed.title}" created but publish failed: ${publishResult.error}.${kwInfo}` }
     }
     return { message: `Post "${parsed.title}" written and published automatically.${kwInfo}` }
