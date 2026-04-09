@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { getKeywordIdeas, getSearchVolumes, selectBestKeyword, analyzeSerpIntent, classifyIntent, type SerpIntent } from '../../../../../lib/dataforseo'
 
 export const maxDuration = 60
+export const preferredRegion = ['iad1']
 
 function auth(req: NextRequest) {
   return req.headers.get('x-admin-key') === process.env.ADMIN_KEY
