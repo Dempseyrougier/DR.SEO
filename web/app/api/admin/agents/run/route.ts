@@ -457,8 +457,9 @@ export async function POST(req: NextRequest) {
       result = { message: 'Content refresh agent coming soon.' }
     } else if (agent === 'publisher') {
       // company_id here is actually a post id
-      result = await runPublisher(company_id)
-      if (!result) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
+      const publishResult = await runPublisher(company_id)
+      if (!publishResult) return NextResponse.json({ error: 'Post not found' }, { status: 404 })
+      result = publishResult
     } else {
       result = { error: 'Unknown agent' }
     }
