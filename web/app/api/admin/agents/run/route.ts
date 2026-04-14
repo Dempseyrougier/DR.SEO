@@ -678,6 +678,8 @@ async function publishToWordPress(post: {
     status: 'publish',
     slug,
     excerpt: post.meta_description ?? '',
+    comment_status: 'closed',
+    ping_status: 'closed',
     // Yoast SEO meta fields
     meta: {
       _yoast_wpseo_title: seoTitle,
@@ -689,6 +691,7 @@ async function publishToWordPress(post: {
     method: 'POST',
     headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
     body,
+    signal: AbortSignal.timeout(30000),
   })
 
   if (!res.ok) {
@@ -711,6 +714,7 @@ async function publishToWordPress(post: {
           rank_math_focus_keyword: '',
         },
       }),
+      signal: AbortSignal.timeout(10000),
     })
   } catch { /* RankMath not installed — fine */ }
 

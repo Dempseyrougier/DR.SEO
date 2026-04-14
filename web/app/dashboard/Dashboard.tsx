@@ -91,15 +91,26 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
     const key = companyId ? `${agent}:${companyId}` : agent
     setAgentRunning(key)
     setAgentResult(prev => ({ ...prev, [key]: '' }))
-    const res = await fetch('/api/admin/agents/run', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent, company_id: companyId, ...extra }),
-    })
-    const data = await res.json()
-    setAgentResult(prev => ({ ...prev, [key]: data.message ?? data.error ?? 'Done' }))
-    setAgentRunning(null)
-    if (res.ok) fetchData()
+    try {
+      const res = await fetch('/api/admin/agents/run', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent, company_id: companyId, ...extra }),
+      })
+      let data: { message?: string; error?: string }
+      try {
+        data = await res.json()
+      } catch {
+        data = { error: `Server error (status ${res.status}) — check Vercel logs` }
+      }
+      setAgentResult(prev => ({ ...prev, [key]: data.message ?? data.error ?? 'Done' }))
+      if (res.ok) fetchData()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Network error'
+      setAgentResult(prev => ({ ...prev, [key]: `Failed: ${msg}` }))
+    } finally {
+      setAgentRunning(null)
+    }
   }
 
   async function updatePostStatus(postId: string, status: 'approved' | 'published' | 'failed') {
