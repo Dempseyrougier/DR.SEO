@@ -266,7 +266,7 @@ CTA block — always end the article with exactly this structure:
 </div>
 
 ## Response format
-Return ONLY valid JSON — no markdown, no commentary:
+Return ONLY valid JSON — no markdown fences, no commentary, no \`\`\`json wrapper:
 {
   "title": "exact H1 title (include primary keyword near the front)",
   "seo_title": "CTR-optimized title tag ≤60 chars for the <title> tag (can differ from H1)",
@@ -299,8 +299,10 @@ Return ONLY valid JSON — no markdown, no commentary:
     content: string
   }
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    parsed = JSON.parse(jsonMatch?.[0] ?? text)
+    // Strip markdown code fences if the model wrapped the JSON
+    const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()
+    const jsonMatch = stripped.match(/\{[\s\S]*\}/)
+    parsed = JSON.parse(jsonMatch?.[0] ?? stripped)
   } catch {
     return { error: 'Failed to parse writer output. Raw: ' + text.slice(0, 200) }
   }
