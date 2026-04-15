@@ -199,6 +199,7 @@ Domain: ${company.domain}
 Industry: ${company.industry}
 Voice guidelines: ${company.voice_guidelines ?? 'Professional and informative.'}
 Target keywords to draw from: ${targetKeywords}
+${company.site_context ? `\n## Website audit — reference these specifics in your post\n${company.site_context}` : ''}
 
 ## Existing posts (DO NOT target these same keywords or topics)
 ${existingTopics}
@@ -431,6 +432,128 @@ async function runCitationCheck(companyId: string) {
   }
 }
 
+async function runSiteAudit(companyId: string) {
+  const supabase = getSupabaseAdmin()
+
+  const { data: company } = await supabase
+    .from('companies')
+    .select('name, domain, industry')
+    .eq('id', companyId)
+    .single()
+
+  if (!company) return { error: 'Company not found' }
+  if (!company.domain) return { error: 'Company has no domain set' }
+
+  const baseUrl = `https://${company.domain}`
+
+  async function fetchPageText(url: string): Promise<string> {
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DR.SEO/1.0)' },
+        signal: AbortSignal.timeout(8000),
+      })
+      if (!res.ok) return ''
+      const html = await res.text()
+      return html
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+        .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 3000)
+    } catch {
+      return ''
+    }
+  }
+
+  function extractInternalLinks(html: string): string[] {
+    const matches = html.match(/href=["']([^"'#?]+)["']/gi) ?? []
+    const contentKeywords = ['about', 'service', 'package', 'course', 'sailing', 'offer', 'experience', 'tour', 'proposal', 'wedding', 'pricing', 'learn', 'certif', 'charter', 'beach', 'luxury']
+    const links: string[] = []
+    for (const m of matches) {
+      const href = m.replace(/href=["']([^"'#?]+)["']/i, '$1')
+      let full = ''
+      if (href.startsWith('/') && !href.startsWith('//')) {
+        full = baseUrl + href
+      } else if (href.startsWith(baseUrl)) {
+        full = href
+      }
+      if (full && contentKeywords.some(k => full.toLowerCase().includes(k))) {
+        links.push(full)
+      }
+    }
+    return [...new Set(links)].slice(0, 4)
+  }
+
+  // Fetch homepage
+  let homepageHtml = ''
+  try {
+    const res = await fetch(baseUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DR.SEO/1.0)' },
+      signal: AbortSignal.timeout(8000),
+    })
+    homepageHtml = res.ok ? await res.text() : ''
+  } catch { /* non-fatal */ }
+
+  const homepageText = homepageHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 3000)
+
+  // Discover and fetch key subpages
+  const subpageLinks = extractInternalLinks(homepageHtml)
+  const pageChunks: string[] = [`--- ${baseUrl} ---\n${homepageText}`]
+  for (const link of subpageLinks) {
+    const text = await fetchPageText(link)
+    if (text) pageChunks.push(`--- ${link} ---\n${text}`)
+  }
+
+  const combinedContent = pageChunks.join('\n\n').slice(0, 12000)
+
+  if (!combinedContent.trim()) {
+    return { error: `Could not fetch any content from ${company.domain}` }
+  }
+
+  // Summarise with Haiku
+  const summaryRes = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1000,
+    messages: [{
+      role: 'user',
+      content: `You are auditing a business website to build a reference document for an AI content writer.
+
+Company: ${company.name}
+Domain: ${company.domain}
+Industry: ${company.industry}
+
+Scraped website content:
+${combinedContent}
+
+Extract and summarise into a concise reference document under these headings:
+1. Core offerings (specific service/package/course names, tiers, key details, prices if shown)
+2. Locations served
+3. Unique selling points and differentiators
+4. Credentials, certifications, awards, or partnerships
+5. Target customer profile
+6. Specific details a content writer must reference (instructor names, signature experiences, booking process, key stats, etc.)
+
+Be specific and factual. Only include what is evidenced on the website. Use bullet points.`,
+    }],
+  })
+
+  const siteContext = summaryRes.content[0].type === 'text' ? summaryRes.content[0].text : ''
+  if (!siteContext) return { error: 'Audit summary returned empty' }
+
+  await supabase.from('companies').update({ site_context: siteContext }).eq('id', companyId)
+
+  return { message: `Site audit complete for ${company.name}. Scanned ${pageChunks.length} page(s), saved ${siteContext.length} chars of context.` }
+}
+
 async function runForAllCompanies(agent: string) {
   const supabase = getSupabaseAdmin()
   const { data: companies } = await supabase.from('companies').select('id').eq('active', true)
@@ -474,7 +597,7 @@ export async function POST(req: NextRequest) {
 
   const { agent, company_id, prompt, url } = await req.json()
 
-  if (!['writer', 'citation', 'refresh', 'publisher'].includes(agent)) {
+  if (!['writer', 'citation', 'refresh', 'publisher', 'audit'].includes(agent)) {
     return NextResponse.json({ error: 'Unknown agent' }, { status: 400 })
   }
 
@@ -485,6 +608,9 @@ export async function POST(req: NextRequest) {
       result = company_id ? await runWriter(company_id, prompt, url) : await runForAllCompanies('writer')
     } else if (agent === 'citation') {
       result = company_id ? await runCitationCheck(company_id) : await runForAllCompanies('citation')
+    } else if (agent === 'audit') {
+      if (!company_id) return NextResponse.json({ error: 'company_id required for audit' }, { status: 400 })
+      result = await runSiteAudit(company_id)
     } else if (agent === 'refresh') {
       result = { message: 'Content refresh agent coming soon.' }
     } else if (agent === 'publisher') {

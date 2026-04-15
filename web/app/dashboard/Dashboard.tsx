@@ -473,7 +473,7 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                           </div>
                         )}
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap">
                         <button
                           onClick={() => runAgent('writer', company.id, {
                             prompt: writerPrompt[company.id] || undefined,
@@ -491,6 +491,20 @@ export default function Dashboard({ adminKey, onLogout }: { adminKey: string; on
                         >
                           {agentRunning === `citation:${company.id}` ? 'Checking...' : 'Check Citations'}
                         </button>
+                        {company.domain && (
+                          <button
+                            onClick={() => runAgent('audit', company.id)}
+                            disabled={!!agentRunning}
+                            title={company.site_context ? 'Re-scan website to refresh context' : 'Scan website to build content context'}
+                            className={`text-xs px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors ${
+                              company.site_context
+                                ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400'
+                                : 'bg-zinc-800 hover:bg-zinc-700 text-blue-400'
+                            }`}
+                          >
+                            {agentRunning === `audit:${company.id}` ? 'Scanning...' : company.site_context ? 'Re-scan Site' : 'Scan Site'}
+                          </button>
+                        )}
                       </div>
                       {agentResult[`writer:${company.id}`] && (
                         <p className="text-xs text-zinc-400 mt-2">{agentResult[`writer:${company.id}`]}</p>

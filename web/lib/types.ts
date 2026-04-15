@@ -16,6 +16,7 @@ export type Company = {
   location_code: number
   money_page_url: string | null
   ga4_property_id: string | null
+  site_context: string | null
   active: boolean
   created_at: string
 }
