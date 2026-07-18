@@ -186,10 +186,14 @@ export async function POST(req: NextRequest) {
 
     // Phase 4: if fewer than 10 relevant keywords found, supplement with ideas from target keywords
     let ideaCount = 0
+    let ideasFetched = 0
+    let ideasFresh = 0
     if (relevant.length < 10 && company.target_keywords?.length) {
       const ideas = await getKeywordIdeas(company.target_keywords.slice(0, 5), locationCode, 50)
       const allCovered = new Set([...covered, ...relevant.map(k => k.keyword.toLowerCase())])
       const freshIdeas = ideas.filter(k => !allCovered.has(k.keyword.toLowerCase()))
+      ideasFetched = ideas.length
+      ideasFresh = freshIdeas.length
 
       // AI filter the ideas too
       const ideaRelevantSet = await filterKeywordsWithAI(
@@ -221,7 +225,18 @@ export async function POST(req: NextRequest) {
     if (ideaCount > 0) parts.push(`${ideaCount} additional opportunities added`)
     if (total === 0) parts.push('No new keywords found — try clearing and re-researching, or add target keywords in company settings')
 
-    return NextResponse.json({ found: total, message: parts.join(' · ') + '.' })
+    return NextResponse.json({
+      found: total,
+      message: parts.join(' · ') + '.',
+      detail: {
+        ranked: ranked.length,
+        ranked_fresh: freshRanked.length,
+        ranked_relevant: relevant.length,
+        ideas_fetched: ideasFetched,
+        ideas_fresh: ideasFresh,
+        ideas_added: ideaCount,
+      },
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 500 })

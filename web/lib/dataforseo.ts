@@ -179,14 +179,34 @@ export async function getKeywordIdeas(
     }))
   } catch (err) {
     console.warn('DataForSEO ideas unavailable, falling back to Autocomplete + Claude:', err)
-    // Expand each seed through real Google Autocomplete data
+    // Expand each seed through real Google Autocomplete data (may be blocked from datacenter IPs)
     const querySet = seeds.slice(0, 4).flatMap(s => [s, `best ${s}`, `how to ${s}`, `${s} for`])
     const suggestionLists = await Promise.all(querySet.map(getAutocompleteSuggestions))
-    const unique = Array.from(new Set([
-      ...seeds,
-      ...suggestionLists.flat().map(s => s.toLowerCase().trim()),
-    ])).filter(Boolean).slice(0, limit + seeds.length)
-    return (await estimateKeywordMetrics(unique)).slice(0, limit)
+    const suggestions = Array.from(new Set(suggestionLists.flat().map(s => s.toLowerCase().trim()))).filter(Boolean)
+
+    // Claude expands the seed list (works even when Autocomplete is unreachable) and estimates metrics
+    const res = await getAnthropic().messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 3000,
+      messages: [{
+        role: 'user',
+        content: `Seed keywords: ${seeds.join(', ')}
+${suggestions.length ? `\nReal Google Autocomplete suggestions for these seeds:\n${suggestions.slice(0, 40).join('\n')}\n` : ''}
+Produce up to ${limit} long-tail keyword ideas closely related to the seed keywords. Include the relevant autocomplete suggestions verbatim, plus your own related ideas. For each, estimate realistic US monthly Google search volume (be conservative: most long-tail keywords are under 1000/month) and ranking difficulty 0-100.
+Return ONLY a JSON array, no commentary:
+[{"keyword":"...","volume":123,"difficulty":25}, ...]`,
+      }],
+    })
+    const text = res.content[0].type === 'text' ? res.content[0].text : '[]'
+    const parsed: Array<{ keyword: string; volume: number; difficulty: number }> =
+      JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
+    return parsed.slice(0, limit).map(p => ({
+      keyword: p.keyword.toLowerCase().trim(),
+      searchVolume: p.volume ?? 0,
+      difficulty: p.difficulty ?? 0,
+      cpc: 0,
+      estimated: true,
+    }))
   }
 }
 
