@@ -1,3 +1,7 @@
+import Anthropic from '@anthropic-ai/sdk'
+import { google } from 'googleapis'
+import { getGoogleAuth, GSC_SCOPES } from './google'
+
 const BASE = 'https://api.dataforseo.com/v3'
 
 function getAuth() {
@@ -12,6 +16,7 @@ export type KeywordVolume = {
   searchVolume: number
   competition: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN'
   cpc: number
+  estimated?: boolean
 }
 
 export type KeywordIdea = {
@@ -19,77 +24,173 @@ export type KeywordIdea = {
   searchVolume: number
   difficulty: number
   cpc: number
+  estimated?: boolean
 }
 
+// ── Fallback providers (used when DataForSEO is unavailable) ─────────────────
+// GSC = real data for our own domains; Custom Search = real SERPs;
+// Autocomplete = real suggestion data; Claude = volume/difficulty estimates.
+
+function getAnthropic() {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+}
+
+/** Estimate US monthly search volume + difficulty with Claude. Estimates, not measurements. */
+async function estimateKeywordMetrics(keywords: string[]): Promise<KeywordIdea[]> {
+  if (!keywords.length) return []
+  const capped = keywords.slice(0, 60)
+  const res = await getAnthropic().messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 2000,
+    messages: [{
+      role: 'user',
+      content: `Estimate realistic US monthly Google search volume and ranking difficulty (0-100) for each keyword. Be conservative: most long-tail keywords are under 1000/month. Return ONLY a JSON array, same order, no commentary:
+[{"keyword":"...","volume":123,"difficulty":25}, ...]
+
+Keywords:
+${capped.map(k => `- ${k}`).join('\n')}`,
+    }],
+  })
+  const text = res.content[0].type === 'text' ? res.content[0].text : '[]'
+  const parsed: Array<{ keyword: string; volume: number; difficulty: number }> =
+    JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
+  return parsed.map(p => ({
+    keyword: p.keyword,
+    searchVolume: p.volume ?? 0,
+    difficulty: p.difficulty ?? 0,
+    cpc: 0,
+    estimated: true,
+  }))
+}
+
+/** Free Google Autocomplete suggestions for a query. */
+async function getAutocompleteSuggestions(query: string): Promise<string[]> {
+  try {
+    const res = await fetch(
+      `https://suggestqueries.google.com/complete/search?client=firefox&hl=en&q=${encodeURIComponent(query)}`,
+      { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' }, signal: AbortSignal.timeout(5000) }
+    )
+    const data = await res.json()
+    return Array.isArray(data?.[1]) ? data[1] : []
+  } catch {
+    return []
+  }
+}
+
+/** Google Custom Search API top results (same key as the citation checker). */
+async function googleTopResults(keyword: string): Promise<Array<{ title: string; url: string; type: string }>> {
+  const apiKey = process.env.GOOGLE_SEARCH_API_KEY
+  const engineId = process.env.GOOGLE_SEARCH_ENGINE_ID
+  if (!apiKey || !engineId) throw new Error('Google Search API not configured')
+  const res = await fetch(
+    `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${engineId}&q=${encodeURIComponent(keyword)}&num=10&gl=us`,
+    { signal: AbortSignal.timeout(10000) }
+  )
+  if (!res.ok) throw new Error(`Google Search API error: ${res.status}`)
+  const data = await res.json()
+  const items: Array<{ title: string; link: string }> = data.items ?? []
+  return items.map(i => ({ title: i.title, url: i.link, type: 'organic' }))
+}
+
+// ── Search volumes ───────────────────────────────────────────────────────────
+
 /**
- * Get search volume + competition for a list of exact keywords (Google Ads data).
- * Cost: ~$0.0001 per keyword
+ * Get search volume + competition for a list of exact keywords.
+ * Primary: DataForSEO Google Ads data. Fallback: Claude estimates (estimated: true).
  */
 export async function getSearchVolumes(
   keywords: string[],
   locationCode = 2840 // United States
 ): Promise<KeywordVolume[]> {
-  const res = await fetch(`${BASE}/keywords_data/google_ads/search_volume/live`, {
-    method: 'POST',
-    headers: { Authorization: getAuth(), 'Content-Type': 'application/json' },
-    body: JSON.stringify([{ keywords, location_code: locationCode, language_code: 'en' }]),
-  })
-  const data = await res.json()
-  if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
-    throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
-  }
-  const items: Array<{
-    keyword: string
-    search_volume: number
-    competition_level: string
-    cpc: number
-  }> = data.tasks?.[0]?.result ?? []
+  try {
+    const res = await fetch(`${BASE}/keywords_data/google_ads/search_volume/live`, {
+      method: 'POST',
+      headers: { Authorization: getAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ keywords, location_code: locationCode, language_code: 'en' }]),
+    })
+    const data = await res.json()
+    if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
+      throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
+    }
+    const items: Array<{
+      keyword: string
+      search_volume: number
+      competition_level: string
+      cpc: number
+    }> = data.tasks?.[0]?.result ?? []
 
-  return items.map(item => ({
-    keyword: item.keyword,
-    searchVolume: item.search_volume ?? 0,
-    competition: (item.competition_level as KeywordVolume['competition']) ?? 'UNKNOWN',
-    cpc: item.cpc ?? 0,
-  }))
+    return items.map(item => ({
+      keyword: item.keyword,
+      searchVolume: item.search_volume ?? 0,
+      competition: (item.competition_level as KeywordVolume['competition']) ?? 'UNKNOWN',
+      cpc: item.cpc ?? 0,
+    }))
+  } catch (err) {
+    console.warn('DataForSEO volumes unavailable, falling back to Claude estimates:', err)
+    const estimates = await estimateKeywordMetrics(keywords)
+    return estimates.map(e => ({
+      keyword: e.keyword,
+      searchVolume: e.searchVolume,
+      competition: 'UNKNOWN' as const,
+      cpc: 0,
+      estimated: true,
+    }))
+  }
 }
+
+// ── Keyword ideas ────────────────────────────────────────────────────────────
 
 /**
  * Get keyword ideas + difficulty scores for seed keywords.
- * Cost: ~$0.0015 per result item
+ * Primary: DataForSEO Labs. Fallback: Google Autocomplete expansion + Claude estimates.
  */
 export async function getKeywordIdeas(
   seeds: string[],
   locationCode = 2840,
   limit = 30
 ): Promise<KeywordIdea[]> {
-  const res = await fetch(`${BASE}/dataforseo_labs/google/keyword_ideas/live`, {
-    method: 'POST',
-    headers: { Authorization: getAuth(), 'Content-Type': 'application/json' },
-    body: JSON.stringify([{
-      keywords: seeds,
-      location_code: locationCode,
-      language_code: 'en',
-      limit,
-      order_by: ['keyword_info.search_volume,desc'],
-    }]),
-  })
-  const data = await res.json()
-  if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
-    throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
-  }
-  const items: Array<{
-    keyword: string
-    keyword_info: { search_volume: number; cpc: number }
-    keyword_properties: { keyword_difficulty: number }
-  }> = data.tasks?.[0]?.result?.[0]?.items ?? []
+  try {
+    const res = await fetch(`${BASE}/dataforseo_labs/google/keyword_ideas/live`, {
+      method: 'POST',
+      headers: { Authorization: getAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([{
+        keywords: seeds,
+        location_code: locationCode,
+        language_code: 'en',
+        limit,
+        order_by: ['keyword_info.search_volume,desc'],
+      }]),
+    })
+    const data = await res.json()
+    if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
+      throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
+    }
+    const items: Array<{
+      keyword: string
+      keyword_info: { search_volume: number; cpc: number }
+      keyword_properties: { keyword_difficulty: number }
+    }> = data.tasks?.[0]?.result?.[0]?.items ?? []
 
-  return items.map(item => ({
-    keyword: item.keyword,
-    searchVolume: item.keyword_info?.search_volume ?? 0,
-    difficulty: item.keyword_properties?.keyword_difficulty ?? 0,
-    cpc: item.keyword_info?.cpc ?? 0,
-  }))
+    return items.map(item => ({
+      keyword: item.keyword,
+      searchVolume: item.keyword_info?.search_volume ?? 0,
+      difficulty: item.keyword_properties?.keyword_difficulty ?? 0,
+      cpc: item.keyword_info?.cpc ?? 0,
+    }))
+  } catch (err) {
+    console.warn('DataForSEO ideas unavailable, falling back to Autocomplete + Claude:', err)
+    // Expand each seed through real Google Autocomplete data
+    const querySet = seeds.slice(0, 4).flatMap(s => [s, `best ${s}`, `how to ${s}`, `${s} for`])
+    const suggestionLists = await Promise.all(querySet.map(getAutocompleteSuggestions))
+    const unique = Array.from(new Set([
+      ...seeds,
+      ...suggestionLists.flat().map(s => s.toLowerCase().trim()),
+    ])).filter(Boolean).slice(0, limit + seeds.length)
+    return (await estimateKeywordMetrics(unique)).slice(0, limit)
+  }
 }
+
+// ── Ranked keywords ──────────────────────────────────────────────────────────
 
 export type RankedKeyword = {
   keyword: string
@@ -97,57 +198,98 @@ export type RankedKeyword = {
   difficulty: number
   rank: number
   url: string
+  estimated?: boolean
 }
 
 /**
- * Fetch all keywords a domain already ranks for in Google (top 100).
- * This is the most reliable way to seed keyword tracking.
- * Cost: ~$0.002 per request
+ * Fetch keywords a domain already ranks for.
+ * Primary: DataForSEO Labs (market-wide, top 100).
+ * Fallback: Google Search Console — real queries, positions, and impressions for
+ * our own verified domains (searchVolume becomes 28-day impressions, a proxy).
  */
 export async function getRankedKeywords(
   domain: string,
   locationCode = 2840,
   limit = 200
 ): Promise<RankedKeyword[]> {
-  const res = await fetch(`${BASE}/dataforseo_labs/google/ranked_keywords/live`, {
-    method: 'POST',
-    headers: { Authorization: getAuth(), 'Content-Type': 'application/json' },
-    body: JSON.stringify([{
-      target: domain,
-      location_code: locationCode,
-      language_code: 'en',
-      limit,
-      order_by: ['ranked_serp_element.serp_item.rank_absolute,asc'],
-      filters: [
-        ['ranked_serp_element.serp_item.rank_absolute', '<=', 100],
-        'and',
-        ['keyword_data.keyword_info.search_volume', '>', 10],
-      ],
-    }]),
-  })
-  const data = await res.json()
-  if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
-    throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
-  }
-  const items: Array<{
-    keyword_data: {
-      keyword: string
-      keyword_info: { search_volume: number }
-      keyword_properties: { keyword_difficulty: number }
+  try {
+    const res = await fetch(`${BASE}/dataforseo_labs/google/ranked_keywords/live`, {
+      method: 'POST',
+      headers: { Authorization: getAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([{
+        target: domain,
+        location_code: locationCode,
+        language_code: 'en',
+        limit,
+        order_by: ['ranked_serp_element.serp_item.rank_absolute,asc'],
+        filters: [
+          ['ranked_serp_element.serp_item.rank_absolute', '<=', 100],
+          'and',
+          ['keyword_data.keyword_info.search_volume', '>', 10],
+        ],
+      }]),
+    })
+    const data = await res.json()
+    if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
+      throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
     }
-    ranked_serp_element: {
-      serp_item: { rank_absolute: number; url: string }
-    }
-  }> = data.tasks?.[0]?.result?.[0]?.items ?? []
+    const items: Array<{
+      keyword_data: {
+        keyword: string
+        keyword_info: { search_volume: number }
+        keyword_properties: { keyword_difficulty: number }
+      }
+      ranked_serp_element: {
+        serp_item: { rank_absolute: number; url: string }
+      }
+    }> = data.tasks?.[0]?.result?.[0]?.items ?? []
 
-  return items.map(item => ({
-    keyword: item.keyword_data.keyword,
-    searchVolume: item.keyword_data.keyword_info?.search_volume ?? 0,
-    difficulty: item.keyword_data.keyword_properties?.keyword_difficulty ?? 0,
-    rank: item.ranked_serp_element.serp_item.rank_absolute,
-    url: item.ranked_serp_element.serp_item.url ?? '',
-  }))
+    return items.map(item => ({
+      keyword: item.keyword_data.keyword,
+      searchVolume: item.keyword_data.keyword_info?.search_volume ?? 0,
+      difficulty: item.keyword_data.keyword_properties?.keyword_difficulty ?? 0,
+      rank: item.ranked_serp_element.serp_item.rank_absolute,
+      url: item.ranked_serp_element.serp_item.url ?? '',
+    }))
+  } catch (err) {
+    console.warn('DataForSEO ranked keywords unavailable, falling back to Search Console:', err)
+    const authClient = await getGoogleAuth(GSC_SCOPES).getClient()
+    const searchConsole = google.searchconsole({ version: 'v1', auth: authClient as never })
+    const endDate = new Date().toISOString().slice(0, 10)
+    const startDate = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const gscRes = await searchConsole.searchanalytics.query({
+      siteUrl: `sc-domain:${domain}`,
+      requestBody: {
+        startDate,
+        endDate,
+        dimensions: ['query', 'page'],
+        rowLimit: Math.min(limit * 2, 1000),
+      },
+    })
+    const rows = gscRes.data.rows ?? []
+    // Dedupe by query, keeping the row with the most impressions
+    const byQuery = new Map<string, { keys?: string[] | null; impressions?: number | null; position?: number | null }>()
+    for (const row of rows) {
+      const q = row.keys?.[0] ?? ''
+      const prev = byQuery.get(q)
+      if (!prev || (row.impressions ?? 0) > (prev.impressions ?? 0)) byQuery.set(q, row)
+    }
+    return Array.from(byQuery.entries())
+      .filter(([, row]) => (row.impressions ?? 0) >= 2 && Math.round(row.position ?? 999) <= 100)
+      .map(([q, row]) => ({
+        keyword: q,
+        searchVolume: row.impressions ?? 0,
+        difficulty: 0,
+        rank: Math.round(row.position ?? 0),
+        url: row.keys?.[1] ?? '',
+        estimated: true,
+      }))
+      .sort((a, b) => a.rank - b.rank)
+      .slice(0, limit)
+  }
 }
+
+// ── SERP intent ──────────────────────────────────────────────────────────────
 
 export type SerpIntent = {
   format: 'listicle' | 'guide' | 'comparison' | 'product' | 'mixed'
@@ -155,36 +297,16 @@ export type SerpIntent = {
   recommendation: string
 }
 
-/**
- * Analyze SERP for a keyword to determine winning content format.
- * Cost: ~$0.002 per request
- */
-export async function analyzeSerpIntent(
-  keyword: string,
-  locationCode = 2840
-): Promise<SerpIntent> {
-  const res = await fetch(`${BASE}/serp/google/organic/live/regular`, {
-    method: 'POST',
-    headers: { Authorization: getAuth(), 'Content-Type': 'application/json' },
-    body: JSON.stringify([{
-      keyword,
-      location_code: locationCode,
-      language_code: 'en',
-      depth: 10,
-    }]),
-  })
-  const data = await res.json()
-  const items: Array<{ title: string; url: string; type: string }> =
-    data.tasks?.[0]?.result?.[0]?.items
-      ?.filter((i: { type: string }) => i.type === 'organic')
-      ?.slice(0, 10)
-      ?.map((i: { title: string; url: string; type: string }) => ({
-        title: i.title,
-        url: i.url,
-        type: i.type,
-      })) ?? []
+const FORMAT_ADVICE: Record<SerpIntent['format'], string> = {
+  listicle: 'Top results are listicles. Use a numbered list format (e.g. "X Best Ways to..."). Each item needs a subheading and 2–3 paragraphs.',
+  guide: 'Top results are comprehensive guides. Write a thorough how-to or explainer with H2 sections covering each subtopic in depth.',
+  comparison: 'Top results are comparison posts. Structure as a head-to-head with a clear recommendation and comparison table.',
+  product: 'Top results are product/commercial pages. Include pricing, features, and a strong CTA. Less editorial, more transactional.',
+  mixed: 'Mixed SERP. Write a comprehensive guide that covers both informational and commercial angles.',
+}
 
-  // Classify format from titles
+/** Classify winning content format from a set of top-ranking titles. */
+function classifySerpFormat(items: Array<{ title: string; url: string; type: string }>): SerpIntent {
   const titles = items.map(i => i.title.toLowerCase()).join(' ')
   let format: SerpIntent['format'] = 'guide'
   if (/\b(\d+\s+(best|top|ways|tips|reasons|ideas)|(best|top)\s+\d+)\b/.test(titles)) {
@@ -199,19 +321,66 @@ export async function analyzeSerpIntent(
     format = 'mixed'
   }
 
-  const formatAdvice: Record<SerpIntent['format'], string> = {
-    listicle: 'Top results are listicles. Use a numbered list format (e.g. "X Best Ways to..."). Each item needs a subheading and 2–3 paragraphs.',
-    guide: 'Top results are comprehensive guides. Write a thorough how-to or explainer with H2 sections covering each subtopic in depth.',
-    comparison: 'Top results are comparison posts. Structure as a head-to-head with a clear recommendation and comparison table.',
-    product: 'Top results are product/commercial pages. Include pricing, features, and a strong CTA. Less editorial, more transactional.',
-    mixed: 'Mixed SERP. Write a comprehensive guide that covers both informational and commercial angles.',
-  }
+  return { format, topResults: items, recommendation: FORMAT_ADVICE[format] }
+}
 
-  return {
-    format,
-    topResults: items,
-    recommendation: formatAdvice[format],
+/**
+ * Analyze SERP for a keyword to determine winning content format.
+ * Primary: DataForSEO live SERP. Fallback: Google Custom Search API top 10.
+ */
+export async function analyzeSerpIntent(
+  keyword: string,
+  locationCode = 2840
+): Promise<SerpIntent> {
+  try {
+    const res = await fetch(`${BASE}/serp/google/organic/live/regular`, {
+      method: 'POST',
+      headers: { Authorization: getAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([{
+        keyword,
+        location_code: locationCode,
+        language_code: 'en',
+        depth: 10,
+      }]),
+    })
+    const data = await res.json()
+    if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
+      throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
+    }
+    const items: Array<{ title: string; url: string; type: string }> =
+      data.tasks?.[0]?.result?.[0]?.items
+        ?.filter((i: { type: string }) => i.type === 'organic')
+        ?.slice(0, 10)
+        ?.map((i: { title: string; url: string; type: string }) => ({
+          title: i.title,
+          url: i.url,
+          type: i.type,
+        })) ?? []
+    return classifySerpFormat(items)
+  } catch (err) {
+    console.warn('DataForSEO SERP unavailable, falling back to Google Custom Search:', err)
+    try {
+      return classifySerpFormat(await googleTopResults(keyword))
+    } catch (err2) {
+      console.warn('Google Custom Search unavailable, falling back to Claude format prediction:', err2)
+      return predictSerpFormat(keyword)
+    }
   }
+}
+
+/** Last-resort SERP intent: Claude predicts the dominant content format (no live SERP data). */
+async function predictSerpFormat(keyword: string): Promise<SerpIntent> {
+  const res = await getAnthropic().messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 10,
+    messages: [{
+      role: 'user',
+      content: `For the Google search "${keyword}", which content format most likely dominates page 1? Answer with exactly one word: listicle, guide, comparison, product, or mixed.`,
+    }],
+  })
+  const text = (res.content[0].type === 'text' ? res.content[0].text : '').toLowerCase().trim()
+  const format = (['listicle', 'guide', 'comparison', 'product', 'mixed'] as const).find(f => text.includes(f)) ?? 'mixed'
+  return { format, topResults: [], recommendation: FORMAT_ADVICE[format] }
 }
 
 export type SearchIntent = 'informational' | 'commercial' | 'transactional' | 'navigational'
