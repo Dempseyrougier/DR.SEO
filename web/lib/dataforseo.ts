@@ -109,8 +109,9 @@ export async function getSearchVolumes(
       body: JSON.stringify([{ keywords, location_code: locationCode, language_code: 'en' }]),
     })
     const data = await res.json()
-    if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
-      throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
+    // Top-level 20000 can still carry a failed task (dead subscription, no Labs access) — check the task itself
+    if (data.tasks?.[0]?.status_code !== 20000) {
+      throw new Error(`DataForSEO error: ${data.tasks?.[0]?.status_message ?? data.status_message ?? 'no task result'}`)
     }
     const items: Array<{
       keyword: string
@@ -162,8 +163,9 @@ export async function getKeywordIdeas(
       }]),
     })
     const data = await res.json()
-    if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
-      throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
+    // Top-level 20000 can still carry a failed task (dead subscription, no Labs access) — check the task itself
+    if (data.tasks?.[0]?.status_code !== 20000) {
+      throw new Error(`DataForSEO error: ${data.tasks?.[0]?.status_message ?? data.status_message ?? 'no task result'}`)
     }
     const items: Array<{
       keyword: string
@@ -250,8 +252,9 @@ export async function getRankedKeywords(
       }]),
     })
     const data = await res.json()
-    if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
-      throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
+    // Top-level 20000 can still carry a failed task (dead subscription, no Labs access) — check the task itself
+    if (data.tasks?.[0]?.status_code !== 20000) {
+      throw new Error(`DataForSEO error: ${data.tasks?.[0]?.status_message ?? data.status_message ?? 'no task result'}`)
     }
     const items: Array<{
       keyword_data: {
@@ -364,8 +367,9 @@ export async function analyzeSerpIntent(
       }]),
     })
     const data = await res.json()
-    if (data.status_code !== 20000 && data.tasks?.[0]?.status_code !== 20000) {
-      throw new Error(`DataForSEO error: ${data.status_message ?? data.tasks?.[0]?.status_message}`)
+    // Top-level 20000 can still carry a failed task (dead subscription, no Labs access) — check the task itself
+    if (data.tasks?.[0]?.status_code !== 20000) {
+      throw new Error(`DataForSEO error: ${data.tasks?.[0]?.status_message ?? data.status_message ?? 'no task result'}`)
     }
     const items: Array<{ title: string; url: string; type: string }> =
       data.tasks?.[0]?.result?.[0]?.items
