@@ -4,8 +4,11 @@ import { getSupabaseAdmin } from '../../../../lib/supabase'
 export const maxDuration = 300
 
 export async function GET(req: NextRequest) {
+  // Vercel cron authenticates with CRON_SECRET; manual ops runs can use the admin key
   const cronSecret = process.env.CRON_SECRET
-  if (!cronSecret || req.headers.get('authorization') !== `Bearer ${cronSecret}`) {
+  const cronOk = !!cronSecret && req.headers.get('authorization') === `Bearer ${cronSecret}`
+  const adminOk = !!process.env.ADMIN_KEY && req.headers.get('x-admin-key') === process.env.ADMIN_KEY
+  if (!cronOk && !adminOk) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -37,6 +40,12 @@ export async function GET(req: NextRequest) {
 
   if (!due.length) {
     return NextResponse.json({ message: 'No companies are due for a post.' })
+  }
+
+  // ?dry=1 reports which companies are due without triggering any writers
+  if (req.nextUrl.searchParams.get('dry')) {
+    const dueNames = companies.filter(c => due.includes(c.id)).map(c => c.name)
+    return NextResponse.json({ dry_run: true, due: dueNames })
   }
 
   const adminKey = process.env.ADMIN_KEY

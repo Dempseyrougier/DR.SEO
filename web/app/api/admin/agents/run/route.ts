@@ -42,7 +42,9 @@ async function runWriter(companyId: string, customPrompt?: string, referenceUrl?
     : 'general industry terms'
 
   const locationCode: number = (company as { location_code?: number }).location_code ?? 2840
-  const moneyPageUrl: string | null = (company as { money_page_url?: string | null }).money_page_url ?? null
+  // money_page_url column may not exist yet; site_context can declare it with a "MONEY_PAGE_URL: <url>" line
+  const ctxMoneyPage: string | null = company.site_context?.match(/MONEY_PAGE_URL:\s*(\S+)/)?.[1] ?? null
+  const moneyPageUrl: string | null = (company as { money_page_url?: string | null }).money_page_url ?? ctxMoneyPage
 
   // ── Step 1: Keyword research via DataForSEO ────────────────────────────────
   let selectedKeyword: { keyword: string; searchVolume: number; difficulty: number } | null = null
