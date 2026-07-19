@@ -286,7 +286,10 @@ Return ONLY valid JSON — no markdown fences, no commentary, no \`\`\`json wrap
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 6000,
+    // 6000 truncated full articles mid-JSON (a 1400-1800 word HTML post encoded
+    // as a JSON string exceeds it), which broke the parser below. 16000 gives
+    // ample headroom and stays under the SDK's non-streaming HTTP timeout.
+    max_tokens: 16000,
     messages: [{ role: 'user', content: userMessage }],
     system: systemPrompt,
   })
