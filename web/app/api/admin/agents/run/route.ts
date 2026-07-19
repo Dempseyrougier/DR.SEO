@@ -269,16 +269,17 @@ CTA block — always end the article with exactly this structure:
 </div>
 
 ## Response format
-Return ONLY valid JSON — no markdown fences, no commentary, no \`\`\`json wrapper:
+Return the metadata as a JSON object, then the HTML article body after a line containing exactly ===CONTENT===. Do NOT put the HTML inside the JSON, and do NOT use markdown fences. After the delimiter the HTML is raw — it does not need to be escaped or quoted.
 {
   "title": "exact H1 title (include primary keyword near the front)",
   "seo_title": "CTR-optimized title tag ≤60 chars for the <title> tag (can differ from H1)",
   "target_keyword": "primary keyword phrase",
   "secondary_keywords": ["kw1", "kw2", "kw3"],
   "meta_description": "compelling 150–160 char meta description with primary keyword",
-  "slug": "url-friendly-slug-max-6-words",
-  "content": "full HTML content as a single string"
-}`
+  "slug": "url-friendly-slug-max-6-words"
+}
+===CONTENT===
+<h2>...the full HTML article body goes here, raw...</h2>`
 
   const userMessage = customPrompt
     ? `Write an SEO blog post for ${company.name} about: ${customPrompt}. Make it genuinely useful — the kind of content that earns backlinks and ranks.`
@@ -286,9 +287,7 @@ Return ONLY valid JSON — no markdown fences, no commentary, no \`\`\`json wrap
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    // 6000 truncated full articles mid-JSON (a 1400-1800 word HTML post encoded
-    // as a JSON string exceeds it), which broke the parser below. 16000 gives
-    // ample headroom and stays under the SDK's non-streaming HTTP timeout.
+    // Headroom for a full article; stays under the SDK's non-streaming HTTP timeout.
     max_tokens: 16000,
     messages: [{ role: 'user', content: userMessage }],
     system: systemPrompt,
@@ -305,10 +304,22 @@ Return ONLY valid JSON — no markdown fences, no commentary, no \`\`\`json wrap
     content: string
   }
   try {
-    // Strip markdown code fences if the model wrapped the JSON
-    const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()
-    const jsonMatch = stripped.match(/\{[\s\S]*\}/)
-    parsed = JSON.parse(jsonMatch?.[0] ?? stripped)
+    // Metadata JSON and the HTML body are separated by a ===CONTENT=== delimiter so the
+    // HTML never has to be JSON-escaped — unescaped quotes/newlines in the article body
+    // used to break JSON.parse. Fall back to whole-blob JSON for any old-format response.
+    const DELIM = '===CONTENT==='
+    const idx = text.indexOf(DELIM)
+    if (idx !== -1) {
+      const metaRaw = text.slice(0, idx).replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
+      const metaMatch = metaRaw.match(/\{[\s\S]*\}/)
+      const meta = JSON.parse(metaMatch?.[0] ?? metaRaw)
+      const content = text.slice(idx + DELIM.length).replace(/^\s*```\w*\s*/, '').replace(/```\s*$/i, '').trim()
+      parsed = { ...meta, content }
+    } else {
+      const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()
+      const jsonMatch = stripped.match(/\{[\s\S]*\}/)
+      parsed = JSON.parse(jsonMatch?.[0] ?? stripped)
+    }
   } catch {
     return { error: 'Failed to parse writer output. Raw: ' + text.slice(0, 200) }
   }
