@@ -45,6 +45,11 @@ async function runWriter(companyId: string, customPrompt?: string, referenceUrl?
   // money_page_url column may not exist yet; site_context can declare it with a "MONEY_PAGE_URL: <url>" line
   const ctxMoneyPage: string | null = company.site_context?.match(/MONEY_PAGE_URL:\s*(\S+)/)?.[1] ?? null
   const moneyPageUrl: string | null = (company as { money_page_url?: string | null }).money_page_url ?? ctxMoneyPage
+  // Author identity, same site_context marker idiom as MONEY_PAGE_URL. A real
+  // named author is an E-E-A-T requirement, not decoration: posts published
+  // with a blank byline were part of what got this pipeline flagged.
+  const authorName: string | null = company.site_context?.match(/AUTHOR_NAME:\s*(.+)/)?.[1]?.trim() ?? null
+  const authorCreds: string | null = company.site_context?.match(/AUTHOR_CREDENTIALS:\s*(.+)/)?.[1]?.trim() ?? null
 
   // ── Step 1: Keyword research via DataForSEO ────────────────────────────────
   let selectedKeyword: { keyword: string; searchVolume: number; difficulty: number } | null = null
@@ -217,7 +222,7 @@ ${serpIntent ? `- CONTENT FORMAT: Write as a ${serpIntent.format} — ${serpInte
 ${customPrompt ? `- User-requested angle: "${customPrompt}" — prioritize this direction` : ''}
 - Word count: 1,400–1,800 words
 - Structure: H1 title, 4–6 H2 sections, H3 subsections where appropriate
-- Include a FAQ section at the end (4–5 questions with direct answers in <h3>/<p> format)
+- Include a FAQ section at the end ONLY if the topic genuinely raises questions a reader would ask (3–6 questions with direct answers in <h3>/<p> format). A destination guide usually earns one; not every post does.
 - Weave in 3–5 secondary/related keywords naturally throughout
 - Write with E-E-A-T in mind: real expertise, specific details, data points — no generic filler
 - End with a clear call-to-action relevant to the business
@@ -229,17 +234,19 @@ AI assistants (Perplexity, ChatGPT, Google AI Overview) cite content that is str
 
 1. DIRECT ANSWER FIRST: The very first paragraph after the H1 must directly answer the core question implied by the keyword in 2–3 sentences. No preamble, no "In this article we'll explore..." — just the answer.
 
-2. CONVERSATIONAL H2 HEADINGS: Phrase H2s as questions the reader would actually type or say:
-   - Good: "How Long Does It Take to Get a Sailing Certificate?"
-   - Bad: "Certification Timeline Overview"
+2. NATURAL H2 HEADINGS: Mix question-form headings ("How Long Does It Take to Get a Sailing Certificate?") with plain statement headings. All-questions is a template fingerprint; use a question only where the section truly answers one.
 
-3. STATISTICS AND SPECIFICS: Include at least 3 specific data points, numbers, or percentages per article. Cite the source inline (e.g., "According to the US Coast Guard..." or "Studies show 73% of..."). Real numbers only — do not fabricate statistics.
+3. TRUTHFULNESS OVER STATISTICS — THIS OUTRANKS EVERY OTHER CONTENT RULE:
+   - Facts about the company (credentials, prices, locations, experience) may ONLY come from the Company and Website audit sections above. Use them — they are your specifics.
+   - NEVER cite an external study, statistic, percentage, or organization claim unless the exact figure appears in the material provided above. No "According to..." and no "Studies show..." from memory: invented or unverifiable citations are the single fastest way to get this site demoted by Google's spam systems.
+   - If no real data point fits a section, write it without one. Concrete practical detail (what a maneuver feels like, what a day on the course looks like, what a mistake costs) beats a number.
+   - Never state the same fact two different ways in one article. Reread your claims for internal consistency before finishing.
 
-4. ENTITY SIGNALS: In the introduction or a dedicated section, clearly establish WHO the business is, WHAT they do, WHERE they operate, and WHY they are authoritative (years in business, certifications, notable credentials). This helps AI models correctly identify and cite ${company.name}.
+4. ENTITY SIGNALS: In the introduction or a dedicated section, clearly establish WHO the business is, WHAT they do, WHERE they operate, and WHY they are authoritative (years in business, certifications, notable credentials). This helps AI models correctly identify and cite ${company.name}.${authorName ? `\n   Write in the first-person-plural voice of the team where natural. The article is bylined ${authorName}${authorCreds ? ` (${authorCreds})` : ''}; you may reference the author's direct experience where it is supported by the company facts above.` : ''}
 
 5. DEFINITION BOXES: For any technical term or concept central to the topic, include a bolded definition sentence immediately after first use: e.g., <p><strong>[Term]</strong> is defined as...</p>
 
-6. FAQ SECTION STRUCTURE: The FAQ section MUST use <h3> tags for each question and <p> tags for each answer, formatted so each Q&A pair is immediately extractable. Minimum 4 pairs, maximum 8.
+6. FAQ SECTION STRUCTURE: If you include a FAQ, it MUST use <h3> tags for each question and <p> tags for each answer, formatted so each Q&A pair is immediately extractable.
 
 ## HTML output requirements
 - Use semantic HTML: <h2>, <h3>, <p>, <ul>, <ol>, <strong>
@@ -248,25 +255,12 @@ AI assistants (Perplexity, ChatGPT, Google AI Overview) cite content that is str
 - Do NOT add JSON-LD script tags — the publishing system handles schema injection automatically
 - Do NOT include [INTERNAL_LINK: ...] placeholders — omit them entirely
 
-## Formatting that makes posts look professional
-Use these HTML patterns to break up long text. Use single quotes for ALL style attributes — this is required.
+## Formatting — vary it, never template it
+Every post on this site sharing the same callout boxes, the same FAQ shape, and the same closing box is a scaled-content fingerprint Google's spam systems detect. Structure each article the way ITS topic demands:
 
-Stat callout box (use for striking data points):
-<div style='background:#f0f7ff;border-left:4px solid #0066cc;padding:16px 20px;margin:24px 0;border-radius:4px;'>
-  <strong>Key stat:</strong> [insert specific statistic or data point here]
-</div>
-
-Pull quote (use for a compelling one-liner):
-<blockquote style='border-left:4px solid #ddd;margin:24px 0;padding:12px 20px;font-style:italic;color:#555;'>
-  [memorable quote or takeaway]
-</blockquote>
-
-CTA block — always end the article with exactly this structure:
-<div style='background:#0a1628;color:#fff;padding:28px 32px;border-radius:8px;margin:40px 0;text-align:center;'>
-  <h3 style='color:#fff;margin:0 0 8px 0;'>[compelling CTA headline]</h3>
-  <p style='color:#ccc;margin:0 0 20px 0;'>[one supporting sentence]</p>
-  <a href='${moneyPageUrl ?? `https://${company.domain}`}' style='background:#fff;color:#0a1628;padding:12px 28px;border-radius:6px;font-weight:700;text-decoration:none;display:inline-block;'>[CTA button text]</a>
-</div>
+- Use plain semantic HTML (<h2>, <h3>, <p>, <ul>, <ol>, <strong>, <blockquote>). Use single quotes for any style attributes.
+- At most ONE visual callout per article, and only if something genuinely deserves the emphasis — many posts should have none.
+- Vary the closing: end with a short, natural call-to-action paragraph (2–3 sentences) that links to ${moneyPageUrl ?? `https://${company.domain}`} with descriptive anchor text. Write it fresh for each article; never reuse a fixed layout or headline formula.
 
 ## Response format
 Return the metadata as a JSON object, then the HTML article body after a line containing exactly ===CONTENT===. Do NOT put the HTML inside the JSON, and do NOT use markdown fences. After the delimiter the HTML is raw — it does not need to be escaped or quoted.
@@ -651,7 +645,8 @@ function buildArticleSchema(post: {
   meta_description: string | null
   created_at?: string
   published_at?: string | null
-}, company: { name: string; domain: string; wp_url: string }) {
+}, company: { name: string; domain: string; wp_url: string; site_context?: string | null }) {
+  const authorName = company.site_context?.match(/AUTHOR_NAME:\s*(.+)/)?.[1]?.trim()
   return {
     '@context': 'https://schema.org',
     '@type': 'Article',
@@ -659,7 +654,9 @@ function buildArticleSchema(post: {
     description: post.meta_description ?? '',
     datePublished: post.published_at ?? post.created_at ?? new Date().toISOString(),
     dateModified: new Date().toISOString(),
-    author: { '@type': 'Organization', name: company.name, url: company.wp_url },
+    author: authorName
+      ? { '@type': 'Person', name: authorName, worksFor: { '@type': 'Organization', name: company.name, url: company.wp_url } }
+      : { '@type': 'Organization', name: company.name, url: company.wp_url },
     publisher: {
       '@type': 'Organization',
       name: company.name,
@@ -755,12 +752,20 @@ async function publishToWordPress(post: {
   meta_description: string | null
   created_at?: string
   published_at?: string | null
-  companies: { name: string; wp_url: string; wp_user: string; wp_app_password: string; domain: string; industry: string }
+  companies: { name: string; wp_url: string; wp_user: string; wp_app_password: string; domain: string; industry: string; site_context?: string | null }
 }) {
   const supabase = getSupabaseAdmin()
   const { wp_url, wp_user, wp_app_password } = post.companies
   const credentials = Buffer.from(`${wp_user}:${wp_app_password}`).toString('base64')
   const authHeader = `Basic ${credentials}`
+
+  // Byline: WP_AUTHOR_ID in site_context names the WordPress user the post is
+  // authored as (the API-credential user is a bot account and must not be the
+  // public byline). AUTHOR_NAME feeds the Article schema as a Person.
+  const wpAuthorId: number | null = (() => {
+    const m = post.companies.site_context?.match(/WP_AUTHOR_ID:\s*(\d+)/)
+    return m ? parseInt(m[1], 10) : null
+  })()
 
   // Derive a clean slug from the title
   const slug = post.title
@@ -820,6 +825,7 @@ async function publishToWordPress(post: {
     title: post.title,
     content: contentWithSchemas,
     status: 'publish',
+    ...(wpAuthorId ? { author: wpAuthorId } : {}),
     slug,
     excerpt: post.meta_description ?? '',
     comment_status: 'closed',
