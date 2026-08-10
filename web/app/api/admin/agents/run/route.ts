@@ -647,6 +647,9 @@ function buildArticleSchema(post: {
   published_at?: string | null
 }, company: { name: string; domain: string; wp_url: string; site_context?: string | null }) {
   const authorName = company.site_context?.match(/AUTHOR_NAME:\s*(.+)/)?.[1]?.trim()
+  // A Person schema only when the author is an actual person: an AUTHOR_NAME
+  // matching the company means the byline is the organization itself.
+  const isPerson = !!authorName && authorName.toLowerCase() !== company.name.toLowerCase()
   return {
     '@context': 'https://schema.org',
     '@type': 'Article',
@@ -654,7 +657,7 @@ function buildArticleSchema(post: {
     description: post.meta_description ?? '',
     datePublished: post.published_at ?? post.created_at ?? new Date().toISOString(),
     dateModified: new Date().toISOString(),
-    author: authorName
+    author: isPerson
       ? { '@type': 'Person', name: authorName, worksFor: { '@type': 'Organization', name: company.name, url: company.wp_url } }
       : { '@type': 'Organization', name: company.name, url: company.wp_url },
     publisher: {
